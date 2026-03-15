@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Navbar } from './shared/components/navbar/navbar';
 import { ThemeService, Theme } from './core/services/theme.service';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -12,6 +13,7 @@ import { ThemeService, Theme } from './core/services/theme.service';
 })
 export class App {
   readonly themeService = inject(ThemeService);
+  readonly version = environment.version;
   showSettings = signal(false);
 
   get themeClass(): string {
