@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build
 
 # Runtime stage — OpenResty (nginx + LuaJIT) for GCP SA identity-token proxy
-FROM openresty/openresty:alpine AS runtime
+FROM openresty/openresty:alpine-opm AS runtime
 
 # Install lua-resty-http so Lua code can call the GCP metadata server and
 # the upstream API over HTTPS.
