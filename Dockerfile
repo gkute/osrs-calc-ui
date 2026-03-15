@@ -8,12 +8,19 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Runtime stage — serve with nginx
-FROM nginx:alpine AS runtime
+# Runtime stage — OpenResty (nginx + LuaJIT) for GCP SA identity-token proxy
+FROM openresty/openresty:alpine AS runtime
+
+# Install lua-resty-http so Lua code can call the GCP metadata server and
+# the upstream API over HTTPS.
+RUN opm get ledgetech/lua-resty-http
 
 COPY --from=build /app/dist/osrs-calc-ui/browser /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
+# Replace the default OpenResty nginx.conf with ours (includes http-level
+# lua_shared_dict and the /api BFF proxy block).
+COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080
+
+CMD ["openresty", "-g", "daemon off;"]

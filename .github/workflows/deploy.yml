@@ -1,0 +1,54 @@
+name: Deploy UI to Cloud Run
+
+on:
+  workflow_run:
+    workflows: ["Build and Push UI Image"]
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  GCP_PROJECT: oldschoolrunescapetool
+  REGION: us-central1
+
+jobs:
+  deploy:
+    name: Deploy via OpenTofu
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: OpenTofu Init
+        run: tofu init
+
+      - name: OpenTofu Plan
+        run: |
+          tofu plan \
+            -var="image_tag=${{ github.event.workflow_run.head_sha }}" \
+            -var="api_url=${{ secrets.API_SERVICE_URL }}" \
+            -var="domain=${{ vars.UI_DOMAIN }}" \
+            -out=tfplan
+
+      - name: OpenTofu Apply
+        run: tofu apply -auto-approve tfplan
