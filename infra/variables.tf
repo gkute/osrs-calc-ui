@@ -1,13 +1,11 @@
 variable "project_id" {
-  description = "GCP project ID"
+  description = "GCP project ID — must be supplied explicitly; no default to prevent accidental local applies against production"
   type        = string
-  default     = "oldschoolrunescapetool"
 }
 
 variable "region" {
-  description = "GCP region for Cloud Run and regional resources"
+  description = "GCP region for Cloud Run and regional resources — must be supplied explicitly; no default to prevent configuration drift"
   type        = string
-  default     = "us-central1"
 }
 
 variable "image_tag" {
