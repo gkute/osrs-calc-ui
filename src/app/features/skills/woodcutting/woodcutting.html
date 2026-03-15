@@ -1,0 +1,9 @@
+<app-outfit-bonus-panel skillName="woodcutting" (bonusChange)="outfitMultiplier.set($event)" />
+<app-skill-actions-table
+  skillName="Woodcutting"
+  [currentLevel]="currentLevel"
+  [currentXp]="currentXp"
+  [targetLevel]="targetLevel"
+  [targetXp]="targetXp"
+  [xpBonusMultiplier]="outfitMultiplier()"
+/>

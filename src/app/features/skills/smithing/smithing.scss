@@ -1,0 +1,15 @@
+.smithing-options {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+
+  .gauntlets-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+}

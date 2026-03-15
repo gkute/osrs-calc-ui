@@ -1,0 +1,28 @@
+.prayer-bonus-panel {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+
+  h4 { margin: 0 0 0.25rem; }
+
+  .muted-text { color: var(--muted-color); font-size: 0.8rem; margin: 0 0 0.5rem; }
+
+  .bonus-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .bonus-option {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+
+    .bonus-name { font-weight: 500; }
+    .bonus-desc { color: var(--muted-color); font-size: 0.8rem; }
+  }
+}

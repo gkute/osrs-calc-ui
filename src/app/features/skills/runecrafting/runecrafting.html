@@ -1,0 +1,31 @@
+@if (quests().length > 0) {
+  <div class="collapsible-panel">
+    <div class="panel-toggle-header">
+      Completed Quests
+      <span class="muted-text" style="font-weight:400;font-size:0.8rem;margin-left:auto">
+        {{ playerState.completedQuests().size }}/{{ quests().length }} completed
+      </span>
+    </div>
+    <div class="panel-body">
+      <p class="muted-text">Check quests you've completed to unlock quest-locked training methods.</p>
+      <div class="quest-list">
+        @for (quest of quests(); track quest) {
+          <label class="quest-check">
+            <input type="checkbox" [checked]="isQuestComplete(quest)" (change)="toggleQuest(quest)" />
+            {{ quest }}
+          </label>
+        }
+      </div>
+    </div>
+  </div>
+}
+
+<app-skill-actions-table
+  skillName="Runecrafting"
+  [currentLevel]="currentLevel"
+  [currentXp]="currentXp"
+  [targetLevel]="targetLevel"
+  [targetXp]="targetXp"
+  [completedQuests]="playerState.completedQuests()"
+/>
+

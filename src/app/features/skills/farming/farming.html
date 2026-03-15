@@ -1,0 +1,266 @@
+<!-- Quest completion panel -->
+@if (quests().length > 0) {
+  <div class="farming-quests">
+    <h4>Completed Quests</h4>
+    <p class="muted-text">Check quests you've completed to unlock additional patches.</p>
+    <div class="quest-list">
+      @for (quest of quests(); track quest) {
+        <label class="quest-item">
+          <input type="checkbox" [checked]="isQuestComplete(quest)" (change)="toggleQuest(quest)" />
+          {{ quest }}
+        </label>
+      }
+    </div>
+  </div>
+}
+
+<!-- Farm Run toggle button -->
+@if (targetLevel > currentLevel) {
+  <div class="run-section">
+    <button class="run-btn" [class.active]="showFarmRun" (click)="toggleFarmRun()">
+      {{ showFarmRun ? 'Hide' : 'Calculate' }} Farm Run
+    </button>
+  </div>
+}
+
+<!-- Farm Run Calculator panel -->
+@if (showFarmRun && targetLevel > currentLevel) {
+  <div class="run-panel">
+    <h2>Farm Run Calculator</h2>
+    <p class="muted-text">Shows accessible patches, XP per run, and a daily training timeline based on growth rates.</p>
+
+    <!-- Seed selectors for main categories -->
+    <div class="seed-selectors">
+      @if (getAvailableActions('Herb').length > 0) {
+        <div class="seed-select">
+          <label>Herb:</label>
+          <select [(ngModel)]="selectedHerb" (ngModelChange)="onSeedChanged()">
+            @for (a of getAvailableActions('Herb'); track a.name) {
+              <option [value]="a.name">{{ a.name }} ({{ ((a.plantXp ?? 0) + (a.harvestXp ?? 0)) | number:'1.0-1' }} XP)</option>
+            }
+          </select>
+        </div>
+      }
+      @if (getAvailableActions('Tree').length > 0) {
+        <div class="seed-select">
+          <label>Tree:</label>
+          <select [(ngModel)]="selectedTree" (ngModelChange)="onSeedChanged()">
+            @for (a of getAvailableActions('Tree'); track a.name) {
+              <option [value]="a.name">{{ a.name }} ({{ ((a.plantXp ?? 0) + (a.harvestXp ?? 0)) | number:'1.0-1' }} XP)</option>
+            }
+          </select>
+        </div>
+      }
+      @if (getAvailableActions('Fruit Tree').length > 0) {
+        <div class="seed-select">
+          <label>Fruit Tree:</label>
+          <select [(ngModel)]="selectedFruitTree" (ngModelChange)="onSeedChanged()">
+            @for (a of getAvailableActions('Fruit Tree'); track a.name) {
+              <option [value]="a.name">{{ a.name }} ({{ ((a.plantXp ?? 0) + (a.harvestXp ?? 0)) | number:'1.0-1' }} XP)</option>
+            }
+          </select>
+        </div>
+      }
+      @if (getAvailableActions('Hardwood').length > 0) {
+        <div class="seed-select">
+          <label>Hardwood:</label>
+          <select [(ngModel)]="selectedHardwood" (ngModelChange)="onSeedChanged()">
+            @for (a of getAvailableActions('Hardwood'); track a.name) {
+              <option [value]="a.name">{{ a.name }} ({{ ((a.plantXp ?? 0) + (a.harvestXp ?? 0)) | number:'1.0-1' }} XP)</option>
+            }
+          </select>
+        </div>
+      }
+    </div>
+
+    <!-- Daily Training Plan -->
+    @if (runPlanEntries.length > 0) {
+      <div class="run-total">
+        <h3>Daily Training Plan</h3>
+        @if (pricesLoading()) {
+          <p class="muted-text">Loading GE prices…</p>
+        }
+        <div class="table-scroll">
+          <table class="plan-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Seed</th>
+                <th class="num">Patches</th>
+                <th class="num">XP / Run</th>
+                <th>Frequency</th>
+                <th class="num">XP / Day</th>
+                <th class="num">Runs</th>
+                <th class="num">Seeds</th>
+                <th class="num">Sapling Cost</th>
+                <th>Payment</th>
+                <th class="num">Qty</th>
+                <th class="num">Payment Cost</th>
+                <th class="num">Total Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (entry of runPlanEntries; track entry.category) {
+                <tr>
+                  <td>{{ entry.category }}</td>
+                  <td class="nowrap">{{ entry.seedName }}</td>
+                  <td class="num">{{ entry.accessiblePatches }}</td>
+                  <td class="num">{{ entry.xpPerRun | number:'1.0-1' }}</td>
+                  <td class="nowrap">{{ formatRunFreq(entry.runsPerDay) }}</td>
+                  <td class="num">{{ entry.xpPerDay | number:'1.0-1' }}</td>
+                  <td class="num">{{ totalRunsNeeded(entry) | number:'1.0-0' }}</td>
+                  <td class="num">{{ totalSeedsNeeded(entry) | number:'1.0-0' }}</td>
+                  <td class="num"><span [class]="gpClass(totalSaplingCost(entry))">{{ formatGp(totalSaplingCost(entry)) }}</span></td>
+                  <td class="nowrap">{{ paymentDisplay(entry) }}</td>
+                  <td class="num">{{ entry.paymentItem ? (totalPaymentNeeded(entry) | number:'1.0-0') : '—' }}</td>
+                  <td class="num"><span [class]="gpClass(totalPaymentCost(entry))">{{ entry.paymentItem ? formatGp(totalPaymentCost(entry)) : '—' }}</span></td>
+                  <td class="num"><span [class]="gpClass(totalCost(entry))">{{ formatGp(totalCost(entry)) }}</span></td>
+                </tr>
+              }
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="12"><strong>Grand Total</strong></td>
+                <td class="num"><strong><span [class]="gpClass(grandTotal)">{{ formatGp(grandTotal) }}</span></strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div class="timeline-summary">
+          <p>Total daily XP: <strong>{{ totalDailyXp | number:'1.0-1' }}</strong></p>
+          @if (daysToTarget > 0) {
+            <p>Days to level {{ targetLevel }}: <strong>{{ daysToTarget | number:'1.1-1' }}</strong></p>
+            <p class="muted-text">~{{ (daysToTarget / 7) | number:'1.0-0' }} weeks
+              @if (daysToTarget >= 30) { · ~{{ (daysToTarget / 30) | number:'1.1-1' }} months }
+            </p>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Patch Details toggle -->
+    @if (patches(); as p) {
+      <div class="patch-toggle" (click)="showPatchDetails = !showPatchDetails">
+        <span class="chevron" [class.open]="showPatchDetails">›</span>
+        <span>Patch Details</span>
+      </div>
+
+      @if (showPatchDetails) {
+        <!-- Herb Patches -->
+        <div class="patch-group">
+          <h4>Herb Patches ({{ accessibleCount(p.herbPatches) }}/{{ p.herbPatches.length }} accessible)</h4>
+          <div class="table-scroll">
+            <table class="patch-table">
+              <thead><tr><th>Location</th><th>Lvl Req</th><th>Quest Required</th><th>Other Req</th><th>Access</th></tr></thead>
+              <tbody>
+                @for (patch of p.herbPatches; track patch.location) {
+                  <tr [class.inaccessible]="!isPatchAccessible(patch)">
+                    <td>{{ patch.location }}</td>
+                    <td>{{ patch.farmingLevelRequired }}</td>
+                    <td>{{ patch.questRequired ?? '—' }}</td>
+                    <td>{{ patch.otherSkillName ? patch.otherSkillLevel + ' ' + patch.otherSkillName : '—' }}</td>
+                    <td>{{ isPatchAccessible(patch) ? '✔' : '✘' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tree Patches -->
+        <div class="patch-group">
+          <h4>Tree Patches ({{ accessibleCount(p.treePatches) }}/{{ p.treePatches.length }} accessible)</h4>
+          <div class="table-scroll">
+            <table class="patch-table">
+              <thead><tr><th>Location</th><th>Lvl Req</th><th>Quest Required</th><th>Other Req</th><th>Access</th></tr></thead>
+              <tbody>
+                @for (patch of p.treePatches; track patch.location) {
+                  <tr [class.inaccessible]="!isPatchAccessible(patch)">
+                    <td>{{ patch.location }}</td>
+                    <td>{{ patch.farmingLevelRequired }}</td>
+                    <td>{{ patch.questRequired ?? '—' }}</td>
+                    <td>{{ patch.otherSkillName ? patch.otherSkillLevel + ' ' + patch.otherSkillName : '—' }}</td>
+                    <td>{{ isPatchAccessible(patch) ? '✔' : '✘' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Fruit Tree Patches -->
+        <div class="patch-group">
+          <h4>Fruit Tree Patches ({{ accessibleCount(p.fruitTreePatches) }}/{{ p.fruitTreePatches.length }} accessible)</h4>
+          <div class="table-scroll">
+            <table class="patch-table">
+              <thead><tr><th>Location</th><th>Lvl Req</th><th>Quest Required</th><th>Other Req</th><th>Access</th></tr></thead>
+              <tbody>
+                @for (patch of p.fruitTreePatches; track patch.location) {
+                  <tr [class.inaccessible]="!isPatchAccessible(patch)">
+                    <td>{{ patch.location }}</td>
+                    <td>{{ patch.farmingLevelRequired }}</td>
+                    <td>{{ patch.questRequired ?? '—' }}</td>
+                    <td>{{ patch.otherSkillName ? patch.otherSkillLevel + ' ' + patch.otherSkillName : '—' }}</td>
+                    <td>{{ isPatchAccessible(patch) ? '✔' : '✘' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Hardwood Patches -->
+        <div class="patch-group">
+          <h4>Hardwood Patches ({{ accessibleCount(p.hardwoodPatches) }}/{{ p.hardwoodPatches.length }} accessible)</h4>
+          <div class="table-scroll">
+            <table class="patch-table">
+              <thead><tr><th>Location</th><th>Lvl Req</th><th>Quest Required</th><th>Other Req</th><th>Access</th></tr></thead>
+              <tbody>
+                @for (patch of p.hardwoodPatches; track patch.location) {
+                  <tr [class.inaccessible]="!isPatchAccessible(patch)">
+                    <td>{{ patch.location }}</td>
+                    <td>{{ patch.farmingLevelRequired }}</td>
+                    <td>{{ patch.questRequired ?? '—' }}</td>
+                    <td>{{ patch.otherSkillName ? patch.otherSkillLevel + ' ' + patch.otherSkillName : '—' }}</td>
+                    <td>{{ isPatchAccessible(patch) ? '✔' : '✘' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Special Patches -->
+        <div class="patch-group">
+          <h4>Special Patches ({{ accessibleCount(p.specialPatches) }}/{{ p.specialPatches.length }} accessible)</h4>
+          <div class="table-scroll">
+            <table class="patch-table">
+              <thead><tr><th>Location</th><th>Type</th><th>Lvl Req</th><th>Quest Required</th><th>Other Req</th><th>Access</th></tr></thead>
+              <tbody>
+                @for (patch of p.specialPatches; track patch.location) {
+                  <tr [class.inaccessible]="!isPatchAccessible(patch)">
+                    <td>{{ patch.location }}</td>
+                    <td>{{ patch.patchType }}</td>
+                    <td>{{ patch.farmingLevelRequired }}</td>
+                    <td>{{ patch.questRequired ?? '—' }}</td>
+                    <td>{{ patch.otherSkillName ? patch.otherSkillLevel + ' ' + patch.otherSkillName : '—' }}</td>
+                    <td>{{ isPatchAccessible(patch) ? '✔' : '✘' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+    }
+  </div>
+}
+
+<app-skill-actions-table
+  skillName="Farming"
+  [currentLevel]="currentLevel"
+  [currentXp]="currentXp"
+  [targetLevel]="targetLevel"
+  [targetXp]="targetXp"
+/>

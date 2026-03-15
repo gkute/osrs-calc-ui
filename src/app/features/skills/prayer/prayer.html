@@ -1,0 +1,36 @@
+@if (prayerBonuses().length > 0) {
+  <div class="collapsible-panel">
+    <div class="panel-toggle-header" (click)="showBonuses = !showBonuses">
+      <span class="chevron" [class.open]="showBonuses">›</span>
+      XP Bonus — Altar / Location
+    </div>
+    @if (showBonuses) {
+      <div class="panel-body">
+        <p class="muted-text">Applies to Bones and Ashes. Ensouled Heads are unaffected.</p>
+        <div class="bonus-options">
+          @for (bonus of prayerBonuses(); track bonus.name) {
+            <label class="bonus-option">
+              <input
+                type="radio"
+                name="prayerBonus"
+                [value]="bonus.multiplier"
+                [checked]="selectedBonusMultiplier() === bonus.multiplier"
+                (change)="selectedBonusMultiplier.set(bonus.multiplier)"
+              />
+              <span class="bonus-name">{{ bonus.name }}</span>
+              <span class="bonus-desc muted-text">{{ bonus.description }}</span>
+            </label>
+          }
+        </div>
+      </div>
+    }
+  </div>
+}
+<app-skill-actions-table
+  skillName="Prayer"
+  [currentLevel]="currentLevel"
+  [currentXp]="currentXp"
+  [targetLevel]="targetLevel"
+  [targetXp]="targetXp"
+  [xpBonusMultiplier]="selectedBonusMultiplier()"
+/>

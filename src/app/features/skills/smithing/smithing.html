@@ -1,0 +1,50 @@
+<div class="collapsible-panel">
+  <div class="panel-toggle-header" (click)="showBonuses = !showBonuses">
+    <span class="chevron" [class.open]="showBonuses">›</span>
+    XP Bonus — Equipment
+  </div>
+  @if (showBonuses) {
+    <div class="panel-body">
+      <label class="quest-check">
+        <input
+          type="checkbox"
+          [checked]="goldsmiithGauntlets()"
+          (change)="goldsmiithGauntlets.set($any($event.target).checked)"
+        />
+        Goldsmith Gauntlets (Gold bar: 22.5 → 56.2 XP)
+      </label>
+    </div>
+  }
+</div>
+
+@if (quests().length > 0) {
+  <div class="collapsible-panel">
+    <div class="panel-toggle-header">
+      Completed Quests
+      <span class="muted-text" style="font-weight:400;font-size:0.8rem;margin-left:auto">
+        {{ playerState.completedQuests().size }}/{{ quests().length }} completed
+      </span>
+    </div>
+    <div class="panel-body">
+      <p class="muted-text">Check quests you've completed to unlock quest-locked training methods.</p>
+      <div class="quest-list">
+        @for (quest of quests(); track quest) {
+          <label class="quest-check">
+            <input type="checkbox" [checked]="isQuestComplete(quest)" (change)="toggleQuest(quest)" />
+            {{ quest }}
+          </label>
+        }
+      </div>
+    </div>
+  </div>
+}
+
+<app-skill-actions-table
+  skillName="Smithing"
+  [currentLevel]="currentLevel"
+  [currentXp]="currentXp"
+  [targetLevel]="targetLevel"
+  [targetXp]="targetXp"
+  [goldsmiithGauntlets]="goldsmiithGauntlets()"
+  [completedQuests]="playerState.completedQuests()"
+/>

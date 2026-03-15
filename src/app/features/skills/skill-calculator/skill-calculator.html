@@ -1,0 +1,77 @@
+<h1>
+  @if (skillIconUri()) {
+    <img [src]="skillIconUri()" class="skill-header-icon" [alt]="skill()" />
+  }
+  {{ skill() | titlecase }} Calculator
+</h1>
+
+<button class="back-btn back-btn-top" (click)="goBack()">← Back to Hiscores</button>
+
+<div class="calc-summary">
+  <div class="stat-row">
+    <label>
+      Starting Level:
+      <input type="number" min="1" [max]="maxLevel" class="inline-input"
+             [value]="currentLevel()" (change)="onCurrentLevelChange($event)" />
+      @if (isVirtualLevel(currentLevel())) {
+        <span class="virtual-badge" title="Virtual level (above 99)">✦</span>
+      }
+    </label>
+    <label>
+      Starting XP:
+      <input type="number" min="0" [max]="maxXp" class="inline-input xp-input"
+             [value]="currentXp()" (change)="onCurrentXpChange($event)" />
+    </label>
+    <span>Rank: <strong>{{ currentRank() > 0 ? (currentRank() | number) : 'Unranked' }}</strong></span>
+  </div>
+
+  <div class="target-row">
+    <label for="targetLevel">Target Level:</label>
+    <input id="targetLevel" type="number" min="1" [max]="maxLevel" class="inline-input"
+           [value]="targetLevel()" (change)="onTargetLevelChange($event)" />
+    @if (isVirtualLevel(targetLevel())) {
+      <span class="virtual-badge" title="Virtual level (above 99)">✦</span>
+    }
+    <label for="targetXp">Target XP:</label>
+    <input id="targetXp" type="number" min="0" class="inline-input xp-input"
+           [value]="targetXp()" (change)="onTargetXpChange($event)" />
+  </div>
+
+  @if (targetLevel() > currentLevel() && targetLevel() <= maxLevel) {
+    <div class="xp-summary">
+      <p>XP needed: <strong>{{ xpNeeded() | number }}</strong></p>
+      <div class="progress-track">
+        <div class="progress-fill" [style.width]="progressPercent() + '%'"></div>
+      </div>
+      <p class="muted-text">{{ progressPercent().toFixed(1) }}% to {{ isVirtualLevel(targetLevel()) ? 'virtual level' : 'level' }} {{ targetLevel() }}</p>
+    </div>
+  } @else if (currentXp() >= maxXp) {
+    <p><em>Maximum XP reached — 200,000,000!</em></p>
+  } @else if (currentLevel() >= 99) {
+    <p class="muted-text">Level 99 reached! Set a target virtual level (100–127) or XP goal above.</p>
+  }
+</div>
+
+@switch (skill()) {
+  @case ('agility') { <app-agility [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('construction') { <app-construction [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('cooking') { <app-cooking [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('crafting') { <app-crafting [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('farming') { <app-farming [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('firemaking') { <app-firemaking [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('fishing') { <app-fishing [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('fletching') { <app-fletching [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('herblore') { <app-herblore [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('hunter') { <app-hunter [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('magic') { <app-magic [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('mining') { <app-mining [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('prayer') { <app-prayer [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('runecrafting') { <app-runecrafting [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('sailing') { <app-sailing [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('smithing') { <app-smithing [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('thieving') { <app-thieving [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @case ('woodcutting') { <app-woodcutting [currentLevel]="currentLevel()" [currentXp]="currentXp()" [targetLevel]="targetLevel()" [targetXp]="targetXp()" /> }
+  @default { <p class="muted-text">Calculator data for {{ skill() | titlecase }} is not yet available.</p> }
+}
+
+<button class="back-btn" (click)="goBack()">← Back to Hiscores</button>

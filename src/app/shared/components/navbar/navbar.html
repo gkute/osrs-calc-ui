@@ -1,0 +1,12 @@
+<nav class="navbar">
+  <a routerLink="/" class="navbar-brand">Home</a>
+  <ul class="nav-skills">
+    @for (skill of skills; track skill) {
+      <li>
+        <a [routerLink]="['/skills', skill]" routerLinkActive="active" class="nav-skill-link">
+          {{ skill | titlecase }}
+        </a>
+      </li>
+    }
+  </ul>
+</nav>

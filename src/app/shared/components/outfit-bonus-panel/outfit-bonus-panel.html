@@ -1,0 +1,26 @@
+@if (outfit(); as def) {
+  <div class="outfit-panel">
+    <h4>{{ def.outfitName }} Bonus</h4>
+    @if (def.notes) {
+      <p class="outfit-notes">{{ def.notes }}</p>
+    }
+    <div class="outfit-pieces">
+      @for (piece of def.pieces; track piece.name; let i = $index) {
+        <label class="outfit-piece">
+          <input
+            type="checkbox"
+            [checked]="pieceChecked()[i]"
+            (change)="onPieceChange(i, $any($event.target).checked)"
+          />
+          {{ piece.name }}
+          @if (piece.bonusPercent > 0) {
+            <span class="bonus-pct">(+{{ piece.bonusPercent }}%)</span>
+          }
+        </label>
+      }
+    </div>
+    @if (totalBonus > 0) {
+      <p class="total-bonus">Total bonus: +{{ totalBonus.toFixed(1) }}%</p>
+    }
+  </div>
+}

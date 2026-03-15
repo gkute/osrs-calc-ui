@@ -1,0 +1,120 @@
+<h2>All Training Methods</h2>
+<p class="muted-text">Select a category to filter. Methods you don't have the level for are dimmed. Prices from GE include 2% tax on output.</p>
+
+<div class="filter-bar">
+  <label>Category:</label>
+  <select [value]="selectedCategory()" (change)="selectedCategory.set($any($event.target).value)">
+    <option value="">All</option>
+    @for (cat of categories; track cat) {
+      <option [value]="cat">{{ cat }}</option>
+    }
+  </select>
+  @if (hasIngredients) {
+    <label class="toggle-label">
+      <input type="checkbox" [checked]="showMaterials()" (change)="showMaterials.set($any($event.target).checked)" />
+      Materials
+    </label>
+  }
+  @if (hasOutput) {
+    <label class="toggle-label">
+      <input type="checkbox" [checked]="showOutput()" (change)="showOutput.set($any($event.target).checked)" />
+      Output
+    </label>
+  }
+  @if (hasProfit) {
+    <label class="toggle-label">
+      <input type="checkbox" [checked]="showProfit()" (change)="showProfit.set($any($event.target).checked)" />
+      Profit
+    </label>
+  }
+  @if (pricesLoading()) {
+    <span class="muted-text">Loading prices…</span>
+  }
+  @if (loading()) {
+    <span class="muted-text">Loading actions…</span>
+  }
+</div>
+
+<div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th class="sortable" (click)="sortBy('name')">Method<span class="sort-indicator">{{ sortIcon('name') }}</span></th>
+        <th class="sortable" (click)="sortBy('category')">Category<span class="sort-indicator">{{ sortIcon('category') }}</span></th>
+        <th class="sortable" (click)="sortBy('levelRequired')">Lvl Req<span class="sort-indicator">{{ sortIcon('levelRequired') }}</span></th>
+        <th class="sortable" (click)="sortBy('experience')">XP<span class="sort-indicator">{{ sortIcon('experience') }}</span></th>
+        <th class="sortable" (click)="sortBy('members')">Members<span class="sort-indicator">{{ sortIcon('members') }}</span></th>
+        @if (hasIngredients && showMaterials()) {
+        <th>Materials</th>
+        <th class="sortable num" (click)="sortBy('matCost')">Mat Cost<span class="sort-indicator">{{ sortIcon('matCost') }}</span></th>
+        }
+        @if (hasOutput && showOutput()) {
+        <th class="sortable num" (click)="sortBy('output')">Output<span class="sort-indicator">{{ sortIcon('output') }}</span></th>
+        }
+        @if (hasProfit && showProfit()) {
+        <th class="sortable num" (click)="sortBy('profit')">Profit<span class="sort-indicator">{{ sortIcon('profit') }}</span></th>
+        }
+        @if (hasGpData) {
+        <th class="sortable num" (click)="sortBy('gpPerXp')">GP/XP<span class="sort-indicator">{{ sortIcon('gpPerXp') }}</span></th>
+        <th class="sortable num" (click)="sortBy('total')">Total<span class="sort-indicator">{{ sortIcon('total') }}</span></th>
+        }
+        <th class="sortable" (click)="sortBy('notes')">Notes<span class="sort-indicator">{{ sortIcon('notes') }}</span></th>
+        <th class="sortable num" (click)="sortBy('actionsNeeded')">Actions Needed<span class="sort-indicator">{{ sortIcon('actionsNeeded') }}</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (action of filteredActions; track action.name) {
+        @let meetsLevel = currentLevel >= action.levelRequired;
+        @let actionsNeeded = getActionsNeeded(action);
+        @let matCost = getMatCost(action);
+        @let outputPrice = getOutputPrice(action);
+        @let profit = getProfit(action);
+        @let gpPerXp = getGpPerXp(action);
+        @let total = getTotal(action);
+        <tr [class.row-locked]="!meetsLevel" [class.row-quest-locked]="isQuestLocked(action)">
+          <td class="icon-cell">
+            @if (getItemImageUri(action.itemId ?? action.outputItemId); as imgUri) {
+              <img [src]="imgUri" class="item-icon" alt="" />
+            }
+          </td>
+          <td>{{ action.name }}</td>
+          <td>{{ action.category }}</td>
+          <td>{{ action.levelRequired }}</td>
+          <td>{{ action.experience?.toFixed(1) ?? '—' }}@if (getEffectiveXp(action) !== (action.experience ?? 0)) { <span class="xp-effective" title="Effective XP with bonus"> ({{ getEffectiveXp(action).toFixed(1) }})</span> }</td>
+          <td>{{ action.members ? 'Yes' : 'No' }}</td>
+          @if (hasIngredients && showMaterials()) {
+          <td class="ingredients-cell">
+            @if (action.ingredients && action.ingredients.length > 0) {
+              @for (ing of action.ingredients; track ing.name; let last = $last) {
+                <span class="ingredient-item">
+                  @if (getItemImageUri(ing.itemId); as imgUri) {
+                    <img [src]="imgUri" class="item-icon-sm" alt="" [title]="ing.name" />
+                  }
+                  <span>{{ ing.quantity > 1 ? ing.name + ' x' + ing.quantity : ing.name }}</span>
+                </span>
+                @if (!last) { <span class="ingredient-sep"> + </span> }
+              }
+            } @else {
+              <span>—</span>
+            }
+          </td>
+          <td class="num">{{ matCost != null ? (matCost | number) : '—' }}</td>
+          }
+          @if (hasOutput && showOutput()) {
+          <td class="num">{{ outputPrice != null ? (outputPrice | number) : '—' }}</td>
+          }
+          @if (hasProfit && showProfit()) {
+          <td class="num"><span [class]="profitClass(profit)">{{ profit != null ? formatProfit(profit) : '—' }}</span></td>
+          }
+          @if (hasGpData) {
+          <td class="num"><span [class]="profitClass(gpPerXp)">{{ gpPerXp != null ? gpPerXp.toFixed(1) : '—' }}</span></td>
+          <td class="num"><span [class]="profitClass(total)">{{ total != null ? formatCompact(total) : '—' }}</span></td>
+          }
+          <td>{{ action.notes ?? '—' }}</td>
+          <td class="num">{{ actionsNeeded != null ? (actionsNeeded | number) : '—' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,28 @@
+<div class="page" [class]="themeClass">
+  <header class="top-bar">
+    <span class="app-title">OSRS Calc Tool</span>
+    <button class="settings-btn" (click)="toggleSettings()" title="Settings">⚙</button>
+  </header>
+
+  @if (showSettings()) {
+    <div class="settings-overlay" (click)="toggleSettings()"></div>
+    <div class="settings-panel">
+      <h3>Settings</h3>
+      <label>Theme</label>
+      <select [(ngModel)]="selectedTheme">
+        <option value="system">System Default</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+      <button class="close-btn" (click)="toggleSettings()">Close</button>
+    </div>
+  }
+
+  <app-navbar />
+
+  <main>
+    <article class="content">
+      <router-outlet />
+    </article>
+  </main>
+</div>

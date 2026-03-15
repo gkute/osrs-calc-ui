@@ -1,0 +1,45 @@
+<h1>OSRS Hiscore Lookup</h1>
+
+<div class="search-bar">
+  <label for="playerName">Character Name:</label>
+  <input
+    id="playerName"
+    type="text"
+    [(ngModel)]="searchName"
+    name="playerName"
+    (keydown.enter)="lookup()"
+    [disabled]="loading()"
+  />
+  <button (click)="lookup()" [disabled]="loading() || !searchName.trim()">
+    {{ loading() ? 'Loading…' : 'Lookup' }}
+  </button>
+</div>
+
+@if (error()) {
+  <p class="error-text">{{ error() }}</p>
+}
+
+@if (playerState.lastUpdated()) {
+  <p><em>Last updated: {{ playerState.lastUpdated() | date:'HH:mm:ss' }}</em></p>
+}
+
+@if (playerState.skills().length > 0) {
+  <p class="muted-text">Click a skill card to open the XP calculator.</p>
+  <div class="skill-grid">
+    @for (skill of orderedSkills; track skill.skillName) {
+      <div class="skill-card" (click)="openCalculator(skill)">
+        <div class="card-header">
+          @if (skillIcons().get(skill.skillName); as iconUri) {
+            <img [src]="iconUri" class="skill-icon" [alt]="skill.skillName" />
+          }
+          <span class="skill-name">{{ skill.skillName }}</span>
+        </div>
+        <div class="card-body">
+          <div class="card-stat">Level: <strong>{{ skill.level }}</strong></div>
+          <div class="card-stat">Experience: <strong>{{ skill.experience | number }}</strong></div>
+          <div class="card-stat">Rank: <strong>{{ skill.rank > 0 ? (skill.rank | number) : 'Unranked' }}</strong></div>
+        </div>
+      </div>
+    }
+  </div>
+}
