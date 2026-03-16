@@ -7,6 +7,12 @@ on:
       - completed
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (commit SHA or 'latest')"
+        required: false
+        default: "latest"
 
 env:
   GCP_PROJECT: oldschoolrunescapetool
@@ -16,7 +22,7 @@ jobs:
   deploy:
     name: Deploy via OpenTofu
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
       contents: read
@@ -30,7 +36,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
 
       - name: Authenticate to GCP via Workload Identity Federation
@@ -50,8 +56,8 @@ jobs:
           tofu plan \
             -var="project_id=${{ env.GCP_PROJECT }}" \
             -var="region=${{ env.REGION }}" \
-            -var="image_tag=${{ github.event.workflow_run.head_sha }}" \
-            -var="domain=${{ vars.UI_DOMAIN }}" \
+            -var="image_tag=${{ github.event.workflow_run.head_sha || inputs.image_tag || 'latest' }}" \
+            -var="domain=${{ vars.UI_DOMAIN || 'osrscalctool.com' }}" \
             -out=tfplan
 
       - name: OpenTofu Apply
