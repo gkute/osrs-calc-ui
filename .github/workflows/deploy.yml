@@ -60,7 +60,7 @@ jobs:
             -var="project_id=${{ env.GCP_PROJECT }}" \
             -var="region=${{ env.REGION }}" \
             -var="image_tag=${{ github.event.workflow_run.head_sha || inputs.image_tag || 'latest' }}" \
-            -var="domain=${{ vars.UI_DOMAIN || secrets.UI_DOMAIN }}" \
+            -var="domain=${{ vars.UI_DOMAIN }}" \
             -out=tfplan
 
       - name: OpenTofu Apply
