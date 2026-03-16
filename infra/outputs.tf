@@ -20,5 +20,5 @@ output "service_account_email" {
 
 output "api_url" {
   description = "Resolved API Cloud Run URL injected as API_URL into the UI container"
-  value       = data.google_cloud_run_v2_service.api.uri
+  value       = local.api_url
 }

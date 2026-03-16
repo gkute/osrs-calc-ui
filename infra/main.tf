@@ -3,6 +3,15 @@ locals {
 
   # true when a custom domain is provided — enables managed SSL cert + HTTPS forwarding
   tls_enabled = var.domain != ""
+
+  # Use the regional Cloud Run URL format (project-number.region.run.app) for
+  # internal service-to-service calls — more reliable than the hash-based global URL.
+  api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
+}
+
+# Resolve the numeric project number so we can construct the regional API URL.
+data "google_project" "project" {
+  project_id = var.project_id
 }
 
 # ---------------------------------------------------------------------------
@@ -65,11 +74,11 @@ resource "google_cloud_run_v2_service" "ui" {
 
       # API_URL is consumed by the OpenResty Lua BFF proxy in nginx.conf to
       # both fetch the correct audience identity token and route upstream calls.
-      # Resolved dynamically from the existing osrs-api Cloud Run service so the
-      # API_SERVICE_URL secret is not required and stays in sync automatically.
+      # Uses the regional URL format (project-number.region.run.app) which is
+      # more reliable for internal Cloud Run to Cloud Run communication.
       env {
         name  = "API_URL"
-        value = data.google_cloud_run_v2_service.api.uri
+        value = local.api_url
       }
 
       resources {
