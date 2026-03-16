@@ -9,6 +9,28 @@ locals {
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
 }
 
+# ---------------------------------------------------------------------------
+# Private VPC — used for Direct VPC Egress so the UI Cloud Run service
+# reaches the API over Google's internal network rather than the public
+# internet. This lets the API stay on INGRESS_TRAFFIC_INTERNAL_ONLY while
+# still being reachable from the UI without a Serverless VPC Connector.
+# ---------------------------------------------------------------------------
+
+resource "google_compute_network" "private" {
+  name                    = "osrs-private-vpc"
+  auto_create_subnetworks = false
+  project                 = var.project_id
+}
+
+# /24 subnet satisfies the minimum size required for Direct VPC Egress.
+resource "google_compute_subnetwork" "ui" {
+  name          = "osrs-ui-subnet"
+  ip_cidr_range = "10.8.0.0/24"
+  region        = var.region
+  network       = google_compute_network.private.id
+  project       = var.project_id
+}
+
 # Resolve the numeric project number so we can construct the regional API URL.
 data "google_project" "project" {
   project_id = var.project_id
@@ -59,6 +81,17 @@ resource "google_cloud_run_v2_service" "ui" {
 
   template {
     service_account = google_service_account.ui.email
+
+    # Route all outbound traffic through the private VPC so calls to the API
+    # are treated as internal traffic. The metadata server (169.254.169.254)
+    # is always accessible regardless of this setting.
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.private.name
+        subnetwork = google_compute_subnetwork.ui.name
+      }
+      egress = "ALL_TRAFFIC"
+    }
 
     scaling {
       min_instance_count = 0
