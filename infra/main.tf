@@ -7,27 +7,12 @@ locals {
   # Use the regional Cloud Run URL format (project-number.region.run.app) for
   # internal service-to-service calls — more reliable than the hash-based global URL.
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
-}
 
-# ---------------------------------------------------------------------------
-# CLEANUP PHASE 1 — These VPC resources were created during a failed attempt
-# to use Direct VPC Egress. They must remain here until the Cloud Run service
-# revision that referenced them is fully replaced (vpc_access already removed
-# above). After the next successful deployment, remove this entire block.
-# ---------------------------------------------------------------------------
-
-resource "google_compute_network" "private" {
-  name                    = "osrs-private-vpc"
-  auto_create_subnetworks = false
-  project                 = var.project_id
-}
-
-resource "google_compute_subnetwork" "ui" {
-  name          = "osrs-ui-subnet"
-  ip_cidr_range = "10.8.0.0/24"
-  region        = var.region
-  network       = google_compute_network.private.id
-  project       = var.project_id
+  # Cloud DNS zone name — Cloud Domains names the zone after the apex domain
+  # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
+  # var.domain must be the apex domain for this derivation to be correct.
+  # Override via var.dns_zone_name if your zone has a different name.
+  dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
 }
 
 # Resolve the numeric project number so we can construct the regional API URL.
@@ -299,4 +284,33 @@ resource "google_compute_global_forwarding_rule" "ui_http" {
   port_range            = "80"
   target                = google_compute_target_http_proxy.ui.id
   load_balancing_scheme = "EXTERNAL_MANAGED"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud DNS — A record for the custom domain
+# ---------------------------------------------------------------------------
+
+# Reference the Cloud DNS zone created by Google Cloud Domains when the domain
+# was registered. The zone name defaults to the domain with dots replaced by
+# dashes (e.g. osrscalctool.com → osrscalctool-com), which is what Cloud
+# Domains uses. Override with var.dns_zone_name if yours differs.
+# If the zone does not exist yet, create it manually in Cloud Console or via
+# the gcloud CLI before applying:
+#   gcloud dns managed-zones create <ZONE_NAME> --dns-name=<DOMAIN>. --description=""
+data "google_dns_managed_zone" "ui" {
+  count   = local.tls_enabled ? 1 : 0
+  name    = local.dns_zone_name
+  project = var.project_id
+}
+
+# Apex A record → load balancer static IP. TTL 300 s so DNS changes
+# propagate quickly while the cert is being provisioned.
+resource "google_dns_record_set" "ui_a" {
+  count        = local.tls_enabled ? 1 : 0
+  name         = "${var.domain}."
+  type         = "A"
+  ttl          = 300
+  managed_zone = data.google_dns_managed_zone.ui[0].name
+  project      = var.project_id
+  rrdatas      = [google_compute_global_address.ui.address]
 }

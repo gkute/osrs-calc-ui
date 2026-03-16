@@ -15,7 +15,13 @@ variable "image_tag" {
 }
 
 variable "domain" {
-  description = "Custom domain for the UI (e.g. osrstool.example.com). When provided, a Google-managed SSL cert is provisioned and HTTPS is enabled on the load balancer. Leave empty to use HTTP only."
+  description = "Apex domain for the UI (e.g. osrscalctool.com). Must be the registered root domain — not a subdomain — because the Cloud DNS zone and Google-managed SSL cert are provisioned for this exact name. Leave empty to use HTTP only with the load balancer IP."
+  type        = string
+  default     = ""
+}
+
+variable "dns_zone_name" {
+  description = "Cloud DNS managed zone name for var.domain. Defaults to the apex domain with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com), which is the name Google Cloud Domains creates automatically. Only set this if your zone has a different name."
   type        = string
   default     = ""
 }
