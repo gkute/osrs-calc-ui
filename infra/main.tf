@@ -9,6 +9,27 @@ locals {
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
 }
 
+# ---------------------------------------------------------------------------
+# CLEANUP PHASE 1 — These VPC resources were created during a failed attempt
+# to use Direct VPC Egress. They must remain here until the Cloud Run service
+# revision that referenced them is fully replaced (vpc_access already removed
+# above). After the next successful deployment, remove this entire block.
+# ---------------------------------------------------------------------------
+
+resource "google_compute_network" "private" {
+  name                    = "osrs-private-vpc"
+  auto_create_subnetworks = false
+  project                 = var.project_id
+}
+
+resource "google_compute_subnetwork" "ui" {
+  name          = "osrs-ui-subnet"
+  ip_cidr_range = "10.8.0.0/24"
+  region        = var.region
+  network       = google_compute_network.private.id
+  project       = var.project_id
+}
+
 # Resolve the numeric project number so we can construct the regional API URL.
 data "google_project" "project" {
   project_id = var.project_id
