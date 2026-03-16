@@ -51,7 +51,6 @@ jobs:
             -var="project_id=${{ env.GCP_PROJECT }}" \
             -var="region=${{ env.REGION }}" \
             -var="image_tag=${{ github.event.workflow_run.head_sha }}" \
-            -var="api_url=${{ secrets.API_SERVICE_URL }}" \
             -var="domain=${{ vars.UI_DOMAIN }}" \
             -out=tfplan
 

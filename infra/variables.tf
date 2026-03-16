@@ -14,11 +14,6 @@ variable "image_tag" {
   default     = "latest"
 }
 
-variable "api_url" {
-  description = "Internal URL of the osrs-api Cloud Run service (set via GitHub secret API_SERVICE_URL)"
-  type        = string
-}
-
 variable "domain" {
   description = "Custom domain for the UI (e.g. osrstool.example.com). When provided, a Google-managed SSL cert is provisioned and HTTPS is enabled on the load balancer. Leave empty to use HTTP only."
   type        = string
