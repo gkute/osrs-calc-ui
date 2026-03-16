@@ -65,9 +65,11 @@ resource "google_cloud_run_v2_service" "ui" {
 
       # API_URL is consumed by the OpenResty Lua BFF proxy in nginx.conf to
       # both fetch the correct audience identity token and route upstream calls.
+      # Resolved dynamically from the existing osrs-api Cloud Run service so the
+      # API_SERVICE_URL secret is not required and stays in sync automatically.
       env {
         name  = "API_URL"
-        value = var.api_url
+        value = data.google_cloud_run_v2_service.api.uri
       }
 
       resources {
