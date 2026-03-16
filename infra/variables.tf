@@ -19,3 +19,9 @@ variable "domain" {
   type        = string
   default     = ""
 }
+
+variable "dns_zone_name" {
+  description = "Cloud DNS managed zone name for var.domain. Defaults to the domain with dots replaced by dashes (e.g. osrscalctool-com), which is what Google Cloud Domains creates automatically. Only set this if your zone has a different name."
+  type        = string
+  default     = ""
+}

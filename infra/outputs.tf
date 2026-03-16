@@ -4,7 +4,7 @@ output "service_url" {
 }
 
 output "load_balancer_ip" {
-  description = "Static external IP of the load balancer — create an A record pointing your domain here"
+  description = "Static external IP of the load balancer — the DNS A record is managed by Terraform"
   value       = google_compute_global_address.ui.address
 }
 
@@ -21,4 +21,9 @@ output "service_account_email" {
 output "api_url" {
   description = "Resolved API Cloud Run URL injected as API_URL into the UI container"
   value       = local.api_url
+}
+
+output "dns_nameservers" {
+  description = "Cloud DNS nameservers for the domain zone — verify these match the nameservers set in Google Cloud Domains"
+  value       = local.tls_enabled ? data.google_dns_managed_zone.ui[0].name_servers : []
 }
