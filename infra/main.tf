@@ -8,8 +8,10 @@ locals {
   # internal service-to-service calls — more reliable than the hash-based global URL.
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
 
-  # Cloud DNS zone name — Cloud Domains names the zone after the domain with
-  # dots replaced by dashes. Override via var.dns_zone_name if yours differs.
+  # Cloud DNS zone name — Cloud Domains names the zone after the apex domain
+  # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
+  # var.domain must be the apex domain for this derivation to be correct.
+  # Override via var.dns_zone_name if your zone has a different name.
   dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
 }
 
@@ -292,9 +294,9 @@ resource "google_compute_global_forwarding_rule" "ui_http" {
 # was registered. The zone name defaults to the domain with dots replaced by
 # dashes (e.g. osrscalctool.com → osrscalctool-com), which is what Cloud
 # Domains uses. Override with var.dns_zone_name if yours differs.
-#
-# If no zone exists yet, import or create one:
-#   tofu import 'google_dns_managed_zone.ui[0]' <ZONE_NAME>
+# If the zone does not exist yet, create it manually in Cloud Console or via
+# the gcloud CLI before applying:
+#   gcloud dns managed-zones create <ZONE_NAME> --dns-name=<DOMAIN>. --description=""
 data "google_dns_managed_zone" "ui" {
   count   = local.tls_enabled ? 1 : 0
   name    = local.dns_zone_name
@@ -305,7 +307,7 @@ data "google_dns_managed_zone" "ui" {
 # propagate quickly while the cert is being provisioned.
 resource "google_dns_record_set" "ui_a" {
   count        = local.tls_enabled ? 1 : 0
-  name         = data.google_dns_managed_zone.ui[0].dns_name
+  name         = "${var.domain}."
   type         = "A"
   ttl          = 300
   managed_zone = data.google_dns_managed_zone.ui[0].name
