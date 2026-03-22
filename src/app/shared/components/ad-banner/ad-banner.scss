@@ -1,0 +1,7 @@
+:host {
+  display: block;
+  width: 100%;
+  text-align: center;
+  min-height: 90px; /* reserve space to avoid layout shift */
+  overflow: hidden;
+}
