@@ -15,6 +15,8 @@ import { environment } from '../environments/environment';
 export class App {
   readonly themeService = inject(ThemeService);
   readonly version = environment.version;
+  readonly headerAdSlot = environment.ads.headerSlotId;
+  readonly footerAdSlot = environment.ads.footerSlotId;
   showSettings = signal(false);
 
   get themeClass(): string {

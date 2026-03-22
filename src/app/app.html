@@ -19,7 +19,7 @@
   }
 
   <app-navbar />
-  <app-ad-banner adSlot="XXXXXXXXXX" adFormat="horizontal" />
+  <app-ad-banner [adSlot]="headerAdSlot" adFormat="horizontal" />
 
   <main>
     <article class="content">
@@ -27,6 +27,6 @@
     </article>
   </main>
 
-  <app-ad-banner adSlot="XXXXXXXXXX" adFormat="horizontal" />
+  <app-ad-banner [adSlot]="footerAdSlot" adFormat="horizontal" />
   <footer class="app-footer">v{{ version }}</footer>
 </div>

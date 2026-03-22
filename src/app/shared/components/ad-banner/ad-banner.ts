@@ -1,8 +1,8 @@
-import { Component, Input, afterNextRender, ElementRef, ViewChild } from '@angular/core';
+import { Component, Input, afterNextRender } from '@angular/core';
 
 declare global {
   interface Window {
-    adsbygoogle: unknown[];
+    adsbygoogle?: unknown[];
   }
 }
 
@@ -18,15 +18,11 @@ export class AdBanner {
 
   readonly publisherId = 'ca-pub-8643064861827878';
 
-  @ViewChild('adContainer') adContainer!: ElementRef<HTMLElement>;
-
   constructor() {
     afterNextRender(() => {
-      try {
-        (window.adsbygoogle = window.adsbygoogle || []).push({});
-      } catch {
-        // AdSense not yet loaded (e.g. blocked by ad blocker or pending approval)
-      }
+      // Only push when the slot looks like a real ID (all digits); skip placeholders
+      if (!/^\d+$/.test(this.adSlot)) return;
+      (window.adsbygoogle = window.adsbygoogle ?? []).push({});
     });
   }
 }
