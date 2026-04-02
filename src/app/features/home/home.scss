@@ -1,28 +1,3 @@
-.intro {
-  margin-bottom: 1.5rem;
-
-  p {
-    margin-bottom: 0.75rem;
-    color: var(--text-color);
-    line-height: 1.6;
-  }
-}
-
-.feature-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0.4rem 1rem;
-
-  li {
-    font-size: 0.9rem;
-    color: var(--muted-color);
-    line-height: 1.5;
-  }
-}
-
 .search-bar {
   display: flex;
   align-items: center;
