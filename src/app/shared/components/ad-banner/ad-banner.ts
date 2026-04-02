@@ -18,10 +18,14 @@ export class AdBanner {
 
   readonly publisherId = 'ca-pub-8643064861827878';
 
+  /** Only true when adSlot is a real numeric AdSense slot ID (not a placeholder). */
+  get isValidSlot(): boolean {
+    return /^\d+$/.test(this.adSlot);
+  }
+
   constructor() {
     afterNextRender(() => {
-      // Only push when the slot looks like a real ID (all digits); skip placeholders
-      if (!/^\d+$/.test(this.adSlot)) return;
+      if (!this.isValidSlot) return;
       (window.adsbygoogle = window.adsbygoogle ?? []).push({});
     });
   }
