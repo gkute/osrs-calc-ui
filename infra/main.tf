@@ -377,12 +377,16 @@ resource "google_compute_ssl_certificate" "ui" {
 # --- GCP DNS path: Google-managed SSL cert (auto-renewed by GCP) ---
 
 resource "google_compute_managed_ssl_certificate" "ui" {
-  count   = local.gcp_dns_enabled ? 1 : 0
-  name    = "osrs-ui-cert"
-  project = var.project_id
+  count       = local.gcp_dns_enabled ? 1 : 0
+  name_prefix = "osrs-ui-cert-"
+  project     = var.project_id
 
   managed {
     domains = [var.domain]
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -406,11 +410,16 @@ resource "google_compute_global_forwarding_rule" "ui_https" {
 }
 
 # ---------------------------------------------------------------------------
-# HTTP — always created; redirects to HTTPS when TLS is enabled
+# HTTP — omitted when Cloudflare is enabled because Cloudflare's
+# always_use_https = "on" zone setting redirects HTTP → HTTPS at the edge
+# before traffic ever reaches the GCP load balancer. Creating the forwarding
+# rule when Cloudflare is active would bill ~$18/month for a rule that is
+# never exercised. When Cloudflare is not in front, the rule is created so
+# direct HTTP clients are redirected to HTTPS (or served directly if no TLS).
 # ---------------------------------------------------------------------------
 
 resource "google_compute_url_map" "ui_http_redirect" {
-  count   = local.tls_enabled ? 1 : 0
+  count   = (local.tls_enabled && !local.cloudflare_enabled) ? 1 : 0
   name    = "osrs-ui-http-redirect"
   project = var.project_id
 
@@ -422,17 +431,19 @@ resource "google_compute_url_map" "ui_http_redirect" {
 }
 
 resource "google_compute_target_http_proxy" "ui" {
+  count   = local.cloudflare_enabled ? 0 : 1
   name    = "osrs-ui-http-proxy"
   project = var.project_id
   url_map = local.tls_enabled ? google_compute_url_map.ui_http_redirect[0].id : google_compute_url_map.ui.id
 }
 
 resource "google_compute_global_forwarding_rule" "ui_http" {
+  count                 = local.cloudflare_enabled ? 0 : 1
   name                  = "osrs-ui-http"
   project               = var.project_id
   ip_address            = google_compute_global_address.ui.address
   port_range            = "80"
-  target                = google_compute_target_http_proxy.ui.id
+  target                = google_compute_target_http_proxy.ui[0].id
   load_balancing_scheme = "EXTERNAL_MANAGED"
 }
 
