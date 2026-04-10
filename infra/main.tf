@@ -1,18 +1,53 @@
 locals {
   image = "us-central1-docker.pkg.dev/${var.project_id}/osrs-ui/osrs-ui:${var.image_tag}"
 
-  # true when a custom domain is provided — enables managed SSL cert + HTTPS forwarding
-  tls_enabled = var.domain != ""
+  # TLS requires both a domain and a Cloudflare zone ID.
+  cloudflare_enabled = var.cloudflare_zone_id != ""
+  tls_enabled        = var.domain != "" && local.cloudflare_enabled
 
   # Use the regional Cloud Run URL format (project-number.region.run.app) for
   # internal service-to-service calls — more reliable than the hash-based global URL.
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
 
-  # Cloud DNS zone name — Cloud Domains names the zone after the apex domain
-  # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
-  # var.domain must be the apex domain for this derivation to be correct.
-  # Override via var.dns_zone_name if your zone has a different name.
-  dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
+  # ---------------------------------------------------------------------------
+  # Cloudflare edge IP ranges (https://www.cloudflare.com/ips/)
+  # Used to restrict Cloud Armor ingress to Cloudflare-only traffic so that
+  # the GCP load balancer cannot be reached directly, bypassing Cloudflare.
+  # Review and update these when Cloudflare publishes new ranges.
+  # ---------------------------------------------------------------------------
+  cf_ipv4 = [
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+  ]
+  cf_ipv6 = [
+    "2400:cb00::/32",
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+  ]
+
+  # CEL expression that is TRUE when origin.ip is NOT a Cloudflare edge IP.
+  # Embedded in the Cloud Armor deny rule to block direct LB access.
+  non_cloudflare_expr = "!(${join(" || ", concat(
+    [for cidr in local.cf_ipv4 : "inIpRange(origin.ip,'${cidr}')"],
+    [for cidr in local.cf_ipv6 : "inIpRange(origin.ip,'${cidr}')"],
+  ))})"
 }
 
 # Resolve the numeric project number so we can construct the regional API URL.
@@ -122,6 +157,25 @@ resource "google_compute_security_policy" "ui" {
   name    = "osrs-ui-armor"
   project = var.project_id
 
+  # Block any request that does NOT originate from a Cloudflare edge IP.
+  # This prevents clients from reaching the GCP load balancer directly and
+  # bypassing Cloudflare's DDoS protection and WAF.
+  # Only active when Cloudflare is enabled (var.cloudflare_zone_id is set).
+  dynamic "rule" {
+    for_each = local.cloudflare_enabled ? [1] : []
+    content {
+      priority    = 100
+      action      = "deny(403)"
+      description = "Block traffic not originating from Cloudflare"
+
+      match {
+        expr {
+          expression = local.non_cloudflare_expr
+        }
+      }
+    }
+  }
+
   # Rate limiting — ban IPs that exceed 500 requests/minute for 60 seconds
   rule {
     priority    = 1000
@@ -223,16 +277,50 @@ resource "google_compute_url_map" "ui" {
 }
 
 # ---------------------------------------------------------------------------
-# HTTPS (created only when var.domain is set)
+# TLS — Cloudflare Origin CA certificate (created only when var.domain +
+# var.cloudflare_zone_id are set).
+#
+# Cloudflare terminates public TLS at the edge. The GCP load balancer needs its
+# own certificate for the Cloudflare → origin leg (Full-strict SSL mode).
+# A Cloudflare Origin CA cert is trusted by Cloudflare and never expires for
+# up to 15 years, so it is the correct credential here.
 # ---------------------------------------------------------------------------
 
-resource "google_compute_managed_ssl_certificate" "ui" {
-  count   = local.tls_enabled ? 1 : 0
-  name    = "osrs-ui-cert"
-  project = var.project_id
+resource "tls_private_key" "origin_ca" {
+  count     = local.tls_enabled ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
 
-  managed {
-    domains = [var.domain]
+resource "tls_cert_request" "origin_ca" {
+  count           = local.tls_enabled ? 1 : 0
+  private_key_pem = tls_private_key.origin_ca[0].private_key_pem
+
+  subject {
+    common_name = var.domain
+  }
+
+  dns_names = [var.domain, "*.${var.domain}"]
+}
+
+resource "cloudflare_origin_ca_certificate" "ui" {
+  count              = local.tls_enabled ? 1 : 0
+  csr                = tls_cert_request.origin_ca[0].cert_request_pem
+  hostnames          = [var.domain, "*.${var.domain}"]
+  request_type       = "origin-rsa"
+  requested_validity = 5475 # 15 years
+}
+
+# Upload the Origin CA cert + private key to GCP so the HTTPS proxy can serve it.
+resource "google_compute_ssl_certificate" "ui" {
+  count        = local.tls_enabled ? 1 : 0
+  name_prefix  = "osrs-ui-origin-cert-"
+  project      = var.project_id
+  private_key  = tls_private_key.origin_ca[0].private_key_pem
+  certificate  = cloudflare_origin_ca_certificate.ui[0].certificate
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -242,7 +330,7 @@ resource "google_compute_target_https_proxy" "ui" {
   project = var.project_id
   url_map = google_compute_url_map.ui.id
 
-  ssl_certificates = [google_compute_managed_ssl_certificate.ui[0].id]
+  ssl_certificates = [google_compute_ssl_certificate.ui[0].id]
 }
 
 resource "google_compute_global_forwarding_rule" "ui_https" {
@@ -287,30 +375,30 @@ resource "google_compute_global_forwarding_rule" "ui_http" {
 }
 
 # ---------------------------------------------------------------------------
-# Cloud DNS — A record for the custom domain
+# Cloudflare DNS + zone settings (created only when var.cloudflare_zone_id is set)
 # ---------------------------------------------------------------------------
 
-# Reference the Cloud DNS zone created by Google Cloud Domains when the domain
-# was registered. The zone name defaults to the domain with dots replaced by
-# dashes (e.g. osrscalctool.com → osrscalctool-com), which is what Cloud
-# Domains uses. Override with var.dns_zone_name if yours differs.
-# If the zone does not exist yet, create it manually in Cloud Console or via
-# the gcloud CLI before applying:
-#   gcloud dns managed-zones create <ZONE_NAME> --dns-name=<DOMAIN>. --description=""
-data "google_dns_managed_zone" "ui" {
+# Apex A record in Cloudflare pointing to the GCP load balancer IP.
+# proxied = true routes traffic through Cloudflare's edge (CDN + DDoS protection).
+resource "cloudflare_record" "ui_a" {
   count   = local.tls_enabled ? 1 : 0
-  name    = local.dns_zone_name
-  project = var.project_id
+  zone_id = var.cloudflare_zone_id
+  name    = "@"
+  type    = "A"
+  value   = google_compute_global_address.ui.address
+  proxied = true
+  ttl     = 1 # Must be 1 (auto) when proxied = true
 }
 
-# Apex A record → load balancer static IP. TTL 300 s so DNS changes
-# propagate quickly while the cert is being provisioned.
-resource "google_dns_record_set" "ui_a" {
-  count        = local.tls_enabled ? 1 : 0
-  name         = "${var.domain}."
-  type         = "A"
-  ttl          = 300
-  managed_zone = data.google_dns_managed_zone.ui[0].name
-  project      = var.project_id
-  rrdatas      = [google_compute_global_address.ui.address]
+# Enforce Full (strict) SSL so Cloudflare validates the Origin CA cert, always
+# redirect HTTP → HTTPS, and require TLS 1.2+ across the zone.
+resource "cloudflare_zone_settings_override" "ui" {
+  count   = local.tls_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+
+  settings {
+    ssl              = "strict"
+    always_use_https = "on"
+    min_tls_version  = "1.2"
+  }
 }

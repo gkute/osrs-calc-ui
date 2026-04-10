@@ -1,10 +1,5 @@
-output "service_url" {
-  description = "Direct Cloud Run URL (blocked externally — traffic must go through the load balancer)"
-  value       = google_cloud_run_v2_service.ui.uri
-}
-
 output "load_balancer_ip" {
-  description = "Static external IP of the load balancer — the DNS A record is managed by Terraform"
+  description = "Static external IP of the load balancer — set this as the A record value in Cloudflare (Terraform manages this automatically via cloudflare_record)"
   value       = google_compute_global_address.ui.address
 }
 
@@ -23,7 +18,7 @@ output "api_url" {
   value       = local.api_url
 }
 
-output "dns_nameservers" {
-  description = "Cloud DNS nameservers for the domain zone — verify these match the nameservers set in Google Cloud Domains"
-  value       = local.tls_enabled ? data.google_dns_managed_zone.ui[0].name_servers : []
+output "cloudflare_record" {
+  description = "Cloudflare DNS A record hostname (null when Cloudflare is not enabled)"
+  value       = local.tls_enabled ? cloudflare_record.ui_a[0].hostname : null
 }
