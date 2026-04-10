@@ -377,9 +377,9 @@ resource "google_compute_ssl_certificate" "ui" {
 # --- GCP DNS path: Google-managed SSL cert (auto-renewed by GCP) ---
 
 resource "google_compute_managed_ssl_certificate" "ui" {
-  count       = local.gcp_dns_enabled ? 1 : 0
-  name_prefix = "osrs-ui-cert-"
-  project     = var.project_id
+  count   = local.gcp_dns_enabled ? 1 : 0
+  name    = "osrs-ui-managed-cert"
+  project = var.project_id
 
   managed {
     domains = [var.domain]
