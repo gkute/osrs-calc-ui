@@ -3,7 +3,14 @@ locals {
 
   # Cloudflare-backed TLS/DNS requires both a domain and a Cloudflare zone ID.
   cloudflare_enabled = var.domain != "" && var.cloudflare_zone_id != ""
-  tls_enabled        = local.cloudflare_enabled
+  # Google-managed SSL + Cloud DNS are used when a domain is set but Cloudflare is not.
+  gcp_dns_enabled    = var.domain != "" && var.cloudflare_zone_id == ""
+  # TLS (HTTPS) is active whenever a domain is provided, regardless of which DNS path.
+  tls_enabled        = var.domain != ""
+
+  # Cloud DNS zone name — Cloud Domains names the zone after the apex domain
+  # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
+  dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
 
   # Use the regional Cloud Run URL format (project-number.region.run.app) for
   # internal service-to-service calls — more reliable than the hash-based global URL.
@@ -318,41 +325,30 @@ resource "google_compute_url_map" "ui" {
 }
 
 # ---------------------------------------------------------------------------
-# TLS — self-signed origin certificate (created when Cloudflare is enabled).
+# TLS certificates — two paths, controlled by cloudflare_zone_id:
 #
-# Cloudflare terminates public TLS at the edge using its own auto-managed cert.
-# The GCP load balancer needs a certificate only for the Cloudflare → origin
-# leg. A self-signed cert is sufficient here because:
-#   - Cloudflare "Full" SSL mode encrypts the origin connection without
-#     requiring a public-CA-issued cert (Full strict requires a recognised CA).
-#   - Only Cloudflare edge IPs can reach this load balancer (Cloud Armor rules
-#     100–200 allow only Cloudflare ranges and deny everything else).
+#   cloudflare_zone_id set   → self-signed cert (Cloudflare Full SSL; only
+#                              Cloudflare edge IPs reach the LB via Cloud Armor)
+#   cloudflare_zone_id empty → Google-managed SSL cert (auto-provisioned and
+#                              renewed by GCP; requires Cloud DNS A record)
 #
-# SECURITY NOTE: the RSA private key is stored in the OpenTofu state file
-# (GCS bucket oldschoolrunescapetool-tofu-state). Ensure the bucket has tight
-# IAM controls (Storage Object Admin limited to the deploy service account).
-# To rotate: taint tls_private_key.origin[0] and tls_self_signed_cert.origin[0]
-# then re-apply.
+# SECURITY NOTE (self-signed path): the RSA private key is stored in the
+# OpenTofu state file (GCS bucket oldschoolrunescapetool-tofu-state). Ensure
+# the bucket is tightly IAM-restricted (Storage Object Admin limited to the
+# deploy service account). To rotate: taint tls_private_key.origin[0] and
+# tls_self_signed_cert.origin[0] then re-apply.
 # ---------------------------------------------------------------------------
 
-# Remove the old Google-managed SSL cert from state without destroying it in
-# GCP. The cert will remain in GCP until manually deleted; it is no longer
-# attached to the HTTPS proxy after this apply.
-removed {
-  from = google_compute_managed_ssl_certificate.ui
-  lifecycle {
-    destroy = false
-  }
-}
+# --- Cloudflare path: self-signed origin cert ---
 
 resource "tls_private_key" "origin" {
-  count     = local.tls_enabled ? 1 : 0
+  count     = local.cloudflare_enabled ? 1 : 0
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
 resource "tls_self_signed_cert" "origin" {
-  count           = local.tls_enabled ? 1 : 0
+  count           = local.cloudflare_enabled ? 1 : 0
   private_key_pem = tls_private_key.origin[0].private_key_pem
 
   subject {
@@ -366,9 +362,8 @@ resource "tls_self_signed_cert" "origin" {
   allowed_uses = ["key_encipherment", "digital_signature", "server_auth"]
 }
 
-# Upload the self-signed cert + private key to GCP for the HTTPS proxy.
 resource "google_compute_ssl_certificate" "ui" {
-  count        = local.tls_enabled ? 1 : 0
+  count        = local.cloudflare_enabled ? 1 : 0
   name_prefix  = "osrs-ui-origin-cert-"
   project      = var.project_id
   private_key  = tls_private_key.origin[0].private_key_pem
@@ -379,13 +374,25 @@ resource "google_compute_ssl_certificate" "ui" {
   }
 }
 
+# --- GCP DNS path: Google-managed SSL cert (auto-renewed by GCP) ---
+
+resource "google_compute_managed_ssl_certificate" "ui" {
+  count   = local.gcp_dns_enabled ? 1 : 0
+  name    = "osrs-ui-cert"
+  project = var.project_id
+
+  managed {
+    domains = [var.domain]
+  }
+}
+
 resource "google_compute_target_https_proxy" "ui" {
   count   = local.tls_enabled ? 1 : 0
   name    = "osrs-ui-https-proxy"
   project = var.project_id
   url_map = google_compute_url_map.ui.id
 
-  ssl_certificates = [google_compute_ssl_certificate.ui[0].id]
+  ssl_certificates = local.cloudflare_enabled ? [google_compute_ssl_certificate.ui[0].id] : [google_compute_managed_ssl_certificate.ui[0].id]
 }
 
 resource "google_compute_global_forwarding_rule" "ui_https" {
@@ -430,13 +437,33 @@ resource "google_compute_global_forwarding_rule" "ui_http" {
 }
 
 # ---------------------------------------------------------------------------
-# Cloudflare DNS + zone settings (created only when var.cloudflare_zone_id is set)
+# Cloud DNS — A record (created when domain is set but Cloudflare is NOT used)
+# ---------------------------------------------------------------------------
+
+data "google_dns_managed_zone" "ui" {
+  count   = local.gcp_dns_enabled ? 1 : 0
+  name    = local.dns_zone_name
+  project = var.project_id
+}
+
+resource "google_dns_record_set" "ui_a" {
+  count        = local.gcp_dns_enabled ? 1 : 0
+  name         = "${var.domain}."
+  type         = "A"
+  ttl          = 300
+  managed_zone = data.google_dns_managed_zone.ui[0].name
+  project      = var.project_id
+  rrdatas      = [google_compute_global_address.ui.address]
+}
+
+# ---------------------------------------------------------------------------
+# Cloudflare DNS + zone settings (created only when cloudflare_zone_id is set)
 # ---------------------------------------------------------------------------
 
 # Apex A record in Cloudflare pointing to the GCP load balancer IP.
 # proxied = true routes traffic through Cloudflare's edge (CDN + DDoS protection).
 resource "cloudflare_record" "ui_a" {
-  count           = local.tls_enabled ? 1 : 0
+  count           = local.cloudflare_enabled ? 1 : 0
   zone_id         = var.cloudflare_zone_id
   name            = "@"
   type            = "A"
@@ -449,7 +476,7 @@ resource "cloudflare_record" "ui_a" {
 # Encrypt origin traffic (Full SSL — accepts self-signed origin cert), always
 # redirect HTTP → HTTPS, and require TLS 1.2+ across the zone.
 resource "cloudflare_zone_settings_override" "ui" {
-  count   = local.tls_enabled ? 1 : 0
+  count   = local.cloudflare_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
 
   settings {
