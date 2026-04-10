@@ -129,6 +129,23 @@ resource "google_cloud_run_v2_service" "ui" {
         startup_cpu_boost = true
       }
     }
+
+    # Direct VPC Egress — routes ALL outbound traffic from the UI container
+    # through the project's default VPC.  This makes the UI's requests to the
+    # API Cloud Run service appear as intra-VPC traffic, satisfying the
+    # INGRESS_TRAFFIC_INTERNAL_ONLY restriction on the API without requiring a
+    # Serverless VPC Access Connector (which adds ~$72/month).
+    #
+    # egress = "ALL_TRAFFIC" is required (not PRIVATE_RANGES_ONLY) because the
+    # API's *.run.app URL resolves to a public IP; only ALL_TRAFFIC routes that
+    # through the VPC so Cloud Run treats it as internal.
+    vpc_access {
+      egress = "ALL_TRAFFIC"
+      network_interfaces {
+        network    = "default"
+        subnetwork = "default"
+      }
+    }
   }
 
   depends_on = [google_cloud_run_v2_service_iam_member.ui_invokes_api]
