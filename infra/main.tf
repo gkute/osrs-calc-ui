@@ -12,10 +12,13 @@ locals {
   # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
   dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
 
-  # Use the actual URI from the API Cloud Run service data source so we always
-  # forward requests to the real service URL (which contains a hash component
-  # assigned by Cloud Run — a hand-computed URL will not resolve correctly).
-  api_url = data.google_cloud_run_v2_service.api.uri
+  # Use the project-number URL format for the API.
+  # data.google_cloud_run_v2_service.api.uri returns the hash-based URL
+  # (e.g. osrs-api-hkv2km5d5q-uc.a.run.app) which is the old v1-style default
+  # and resolves differently. The project-number format
+  # (osrs-api-PROJECT_NUMBER.REGION.run.app) is the stable v2 URL and is what
+  # Cloud Run IAM treats as the canonical audience for OIDC token verification.
+  api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
 
   # ---------------------------------------------------------------------------
   # Cloudflare edge IP ranges (https://www.cloudflare.com/ips/)
@@ -66,6 +69,14 @@ resource "google_service_account" "ui" {
 # ---------------------------------------------------------------------------
 # IAM — grant the UI SA permission to invoke the internal API
 # ---------------------------------------------------------------------------
+
+# Used to derive the project number for the API's canonical Cloud Run URL.
+# The project-number URL format (osrs-api-PROJECT_NUMBER.REGION.run.app) is
+# the stable v2 URL; .uri from the Cloud Run data source can return the
+# hash-based v1 URL which resolves differently.
+data "google_project" "project" {
+  project_id = var.project_id
+}
 
 # Reference the already-deployed API service so we can bind IAM without
 # hard-coding resource IDs.
@@ -127,23 +138,6 @@ resource "google_cloud_run_v2_service" "ui" {
         }
         cpu_idle          = true
         startup_cpu_boost = true
-      }
-    }
-
-    # Direct VPC Egress — routes ALL outbound traffic from the UI container
-    # through the project's default VPC.  This makes the UI's requests to the
-    # API Cloud Run service appear as intra-VPC traffic, satisfying the
-    # INGRESS_TRAFFIC_INTERNAL_ONLY restriction on the API without requiring a
-    # Serverless VPC Access Connector (which adds ~$72/month).
-    #
-    # egress = "ALL_TRAFFIC" is required (not PRIVATE_RANGES_ONLY) because the
-    # API's *.run.app URL resolves to a public IP; only ALL_TRAFFIC routes that
-    # through the VPC so Cloud Run treats it as internal.
-    vpc_access {
-      egress = "ALL_TRAFFIC"
-      network_interfaces {
-        network    = "default"
-        subnetwork = "default"
       }
     }
   }
