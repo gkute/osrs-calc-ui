@@ -61,7 +61,12 @@ jobs:
             -var="region=${{ env.REGION }}" \
             -var="image_tag=${{ github.event.workflow_run.head_sha || inputs.image_tag || 'latest' }}" \
             -var="domain=${{ vars.UI_DOMAIN || '' }}" \
+            -var="cloudflare_zone_id=${{ vars.CLOUDFLARE_ZONE_ID || '' }}" \
             -out=tfplan
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: OpenTofu Apply
         run: tofu apply -auto-approve tfplan
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
