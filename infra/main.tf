@@ -12,9 +12,10 @@ locals {
   # with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com).
   dns_zone_name = var.dns_zone_name != "" ? var.dns_zone_name : replace(var.domain, ".", "-")
 
-  # Use the regional Cloud Run URL format (project-number.region.run.app) for
-  # internal service-to-service calls — more reliable than the hash-based global URL.
-  api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
+  # Use the actual URI from the API Cloud Run service data source so we always
+  # forward requests to the real service URL (which contains a hash component
+  # assigned by Cloud Run — a hand-computed URL will not resolve correctly).
+  api_url = data.google_cloud_run_v2_service.api.uri
 
   # ---------------------------------------------------------------------------
   # Cloudflare edge IP ranges (https://www.cloudflare.com/ips/)
@@ -50,11 +51,6 @@ locals {
     "2a06:98c0::/29",
     "2c0f:f248::/32",
   ]
-}
-
-# Resolve the numeric project number so we can construct the regional API URL.
-data "google_project" "project" {
-  project_id = var.project_id
 }
 
 # ---------------------------------------------------------------------------
@@ -131,6 +127,23 @@ resource "google_cloud_run_v2_service" "ui" {
         }
         cpu_idle          = true
         startup_cpu_boost = true
+      }
+    }
+
+    # Direct VPC Egress — routes ALL outbound traffic from the UI container
+    # through the project's default VPC.  This makes the UI's requests to the
+    # API Cloud Run service appear as intra-VPC traffic, satisfying the
+    # INGRESS_TRAFFIC_INTERNAL_ONLY restriction on the API without requiring a
+    # Serverless VPC Access Connector (which adds ~$72/month).
+    #
+    # egress = "ALL_TRAFFIC" is required (not PRIVATE_RANGES_ONLY) because the
+    # API's *.run.app URL resolves to a public IP; only ALL_TRAFFIC routes that
+    # through the VPC so Cloud Run treats it as internal.
+    vpc_access {
+      egress = "ALL_TRAFFIC"
+      network_interfaces {
+        network    = "default"
+        subnetwork = "default"
       }
     }
   }
