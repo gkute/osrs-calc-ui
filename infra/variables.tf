@@ -20,6 +20,12 @@ variable "domain" {
   default     = ""
 }
 
+variable "dns_zone_name" {
+  description = "Cloud DNS managed zone name for var.domain. Only used when cloudflare_zone_id is empty. Defaults to the apex domain with dots replaced by dashes (e.g. osrscalctool.com → osrscalctool-com), which is the name Google Cloud Domains creates automatically. Override if your zone has a different name."
+  type        = string
+  default     = ""
+}
+
 variable "cloudflare_zone_id" {
   description = "Cloudflare Zone ID for var.domain. Found in the Cloudflare dashboard under the domain's Overview tab. When set (together with var.domain), TLS is enabled using a Cloudflare Origin CA certificate, the DNS A record is managed by Terraform, and Cloud Armor restricts ingress to Cloudflare IP ranges only."
   type        = string

@@ -1,5 +1,5 @@
 output "load_balancer_ip" {
-  description = "Static external IP of the load balancer — set this as the A record value in Cloudflare (Terraform manages this automatically via cloudflare_record)"
+  description = "Static external IP of the load balancer — set as the DNS A record (managed by Terraform in either Cloudflare or Cloud DNS mode)"
   value       = google_compute_global_address.ui.address
 }
 
@@ -18,7 +18,17 @@ output "api_url" {
   value       = local.api_url
 }
 
+output "dns_mode" {
+  description = "Active DNS/TLS mode: 'cloudflare', 'gcp-dns', or 'ip-only'"
+  value       = local.cloudflare_enabled ? "cloudflare" : (local.gcp_dns_enabled ? "gcp-dns" : "ip-only")
+}
+
 output "cloudflare_record" {
   description = "Cloudflare DNS A record hostname (null when Cloudflare is not enabled)"
-  value       = local.tls_enabled ? cloudflare_record.ui_a[0].hostname : null
+  value       = local.cloudflare_enabled ? cloudflare_record.ui_a[0].hostname : null
+}
+
+output "gcp_dns_nameservers" {
+  description = "Cloud DNS nameservers for the domain zone (null when using Cloudflare or ip-only mode)"
+  value       = local.gcp_dns_enabled ? data.google_dns_managed_zone.ui[0].name_servers : null
 }
