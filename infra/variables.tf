@@ -32,7 +32,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token with Zone:Read and DNS:Edit permissions for the zone. Required when cloudflare_zone_id is set. Pass via the TF_VAR_cloudflare_api_token environment variable or a CI/CD secret — never hard-code."
+  description = "Cloudflare API token with Zone:Read, DNS:Edit, and Zone Settings:Edit permissions for the zone. Required when cloudflare_zone_id is set. Pass via the TF_VAR_cloudflare_api_token environment variable or a CI/CD secret — never hard-code."
   type        = string
   sensitive   = true
   default     = ""

@@ -11,11 +11,11 @@ locals {
 
   # ---------------------------------------------------------------------------
   # Cloudflare edge IP ranges (https://www.cloudflare.com/ips/)
-  # Used to restrict Cloud Armor ingress to Cloudflare-only traffic so that
-  # the GCP load balancer cannot be reached directly, bypassing Cloudflare.
-  # Review and update these when Cloudflare publishes new ranges.
+  # Split into batches of ≤10 because Cloud Armor SRC_IPS_V1 rules accept at
+  # most 10 ranges each. Cloud Armor's CEL expression limit (5 sub-expressions)
+  # makes the single-CEL approach unworkable with all 22 Cloudflare ranges.
   # ---------------------------------------------------------------------------
-  cf_ipv4 = [
+  cf_ips_batch1 = [
     "173.245.48.0/20",
     "103.21.244.0/22",
     "103.22.200.0/22",
@@ -26,28 +26,23 @@ locals {
     "188.114.96.0/20",
     "197.234.240.0/22",
     "198.41.128.0/17",
+  ]
+  cf_ips_batch2 = [
     "162.158.0.0/15",
     "104.16.0.0/13",
     "104.24.0.0/14",
     "172.64.0.0/13",
     "131.0.72.0/22",
-  ]
-  cf_ipv6 = [
     "2400:cb00::/32",
     "2606:4700::/32",
     "2803:f800::/32",
     "2405:b500::/32",
     "2405:8100::/32",
+  ]
+  cf_ips_batch3 = [
     "2a06:98c0::/29",
     "2c0f:f248::/32",
   ]
-
-  # CEL expression that is TRUE when origin.ip is NOT a Cloudflare edge IP.
-  # Embedded in the Cloud Armor deny rule to block direct LB access.
-  non_cloudflare_expr = "!(${join(" || ", concat(
-    [for cidr in local.cf_ipv4 : "inIpRange(origin.ip,'${cidr}')"],
-    [for cidr in local.cf_ipv6 : "inIpRange(origin.ip,'${cidr}')"],
-  ))})"
 }
 
 # Resolve the numeric project number so we can construct the regional API URL.
@@ -157,114 +152,126 @@ resource "google_compute_security_policy" "ui" {
   name    = "osrs-ui-armor"
   project = var.project_id
 
-  # Block any request that does NOT originate from a Cloudflare edge IP.
-  # This prevents clients from reaching the GCP load balancer directly and
-  # bypassing Cloudflare's DDoS protection and WAF.
-  # Only active when Cloudflare is enabled (var.cloudflare_zone_id is set).
+  # ---------------------------------------------------------------------------
+  # Cloudflare-enabled mode: allow only Cloudflare edge IPs, deny everything
+  # else. Cloud Armor SRC_IPS_V1 rules accept ≤10 CIDR ranges each, so the
+  # 22 Cloudflare ranges are spread across three allow rules (100–102). A
+  # catch-all deny at priority 200 blocks any non-Cloudflare source.
+  # Rate-limiting and WAF are omitted here — Cloudflare handles both at the
+  # edge before traffic even reaches GCP.
+  # ---------------------------------------------------------------------------
+
   dynamic "rule" {
     for_each = local.cloudflare_enabled ? [1] : []
     content {
       priority    = 100
-      action      = "deny(403)"
-      description = "Block traffic not originating from Cloudflare"
-
+      action      = "allow"
+      description = "Allow Cloudflare edge IPs batch 1/3"
       match {
-        expr {
-          expression = local.non_cloudflare_expr
-        }
+        versioned_expr = "SRC_IPS_V1"
+        config { src_ip_ranges = local.cf_ips_batch1 }
       }
     }
   }
 
-  # Rate limiting — ban IPs that exceed 500 requests/minute for 60 seconds.
-  # When Cloudflare is in front, Cloud Armor sees Cloudflare edge IPs rather than
-  # real client IPs, so we key on the CF-Connecting-IP header Cloudflare injects.
-  # Without Cloudflare, fall back to the raw source IP.
   dynamic "rule" {
     for_each = local.cloudflare_enabled ? [1] : []
     content {
-      priority    = 1000
-      action      = "rate_based_ban"
-      description = "Ban clients exceeding 500 req/min for 60 s (keyed on CF-Connecting-IP)"
-
+      priority    = 101
+      action      = "allow"
+      description = "Allow Cloudflare edge IPs batch 2/3"
       match {
         versioned_expr = "SRC_IPS_V1"
-        config {
-          src_ip_ranges = ["*"]
-        }
-      }
-
-      rate_limit_options {
-        rate_limit_threshold {
-          count        = 500
-          interval_sec = 60
-        }
-        ban_duration_sec    = 60
-        conform_action      = "allow"
-        exceed_action       = "deny(429)"
-        enforce_on_key      = "HTTP_HEADER"
-        enforce_on_key_name = "CF-Connecting-IP"
+        config { src_ip_ranges = local.cf_ips_batch2 }
       }
     }
   }
 
+  dynamic "rule" {
+    for_each = local.cloudflare_enabled ? [1] : []
+    content {
+      priority    = 102
+      action      = "allow"
+      description = "Allow Cloudflare edge IPs batch 3/3"
+      match {
+        versioned_expr = "SRC_IPS_V1"
+        config { src_ip_ranges = local.cf_ips_batch3 }
+      }
+    }
+  }
+
+  dynamic "rule" {
+    for_each = local.cloudflare_enabled ? [1] : []
+    content {
+      priority    = 200
+      action      = "deny(403)"
+      description = "Block all traffic not originating from Cloudflare"
+      match {
+        versioned_expr = "SRC_IPS_V1"
+        config { src_ip_ranges = ["*"] }
+      }
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Direct (non-Cloudflare) mode: rate-limit and WAF rules apply when Cloudflare
+  # is not in front. These are skipped when Cloudflare is enabled because
+  # Cloudflare's edge handles rate-limiting and WAF before traffic reaches GCP.
+  # ---------------------------------------------------------------------------
+
+  # Rate limiting — ban IPs that exceed 500 requests/minute for 60 seconds
   dynamic "rule" {
     for_each = local.cloudflare_enabled ? [] : [1]
     content {
       priority    = 1000
       action      = "rate_based_ban"
       description = "Ban IPs exceeding 500 req/min for 60 s"
-
       match {
         versioned_expr = "SRC_IPS_V1"
-        config {
-          src_ip_ranges = ["*"]
-        }
+        config { src_ip_ranges = ["*"] }
       }
-
       rate_limit_options {
         rate_limit_threshold {
           count        = 500
           interval_sec = 60
         }
-        ban_duration_sec   = 60
-        conform_action     = "allow"
-        exceed_action      = "deny(429)"
-        enforce_on_key     = "IP"
+        ban_duration_sec = 60
+        conform_action   = "allow"
+        exceed_action    = "deny(429)"
+        enforce_on_key   = "IP"
       }
     }
   }
 
   # OWASP core WAF rules — blocks XSS, SQLi, LFI, RFI, scanner probes
-  rule {
-    priority    = 2000
-    action      = "deny(403)"
-    description = "OWASP core WAF rules"
-
-    match {
-      expr {
-        expression = join(" || ", [
-          "evaluatePreconfiguredExpr('xss-v33-stable')",
-          "evaluatePreconfiguredExpr('sqli-v33-stable')",
-          "evaluatePreconfiguredExpr('lfi-v33-stable')",
-          "evaluatePreconfiguredExpr('rfi-v33-stable')",
-          "evaluatePreconfiguredExpr('scannerdetection-v33-stable')",
-        ])
+  dynamic "rule" {
+    for_each = local.cloudflare_enabled ? [] : [1]
+    content {
+      priority    = 2000
+      action      = "deny(403)"
+      description = "OWASP core WAF rules"
+      match {
+        expr {
+          expression = join(" || ", [
+            "evaluatePreconfiguredExpr('xss-v33-stable')",
+            "evaluatePreconfiguredExpr('sqli-v33-stable')",
+            "evaluatePreconfiguredExpr('lfi-v33-stable')",
+            "evaluatePreconfiguredExpr('rfi-v33-stable')",
+            "evaluatePreconfiguredExpr('scannerdetection-v33-stable')",
+          ])
+        }
       }
     }
   }
 
-  # Default allow
+  # Default allow — required by Cloud Armor as the lowest-priority rule
   rule {
     priority    = 2147483647
     action      = "allow"
     description = "Default allow"
-
     match {
       versioned_expr = "SRC_IPS_V1"
-      config {
-        src_ip_ranges = ["*"]
-      }
+      config { src_ip_ranges = ["*"] }
     }
   }
 }
@@ -311,53 +318,61 @@ resource "google_compute_url_map" "ui" {
 }
 
 # ---------------------------------------------------------------------------
-# TLS — Cloudflare Origin CA certificate (created only when var.domain +
-# var.cloudflare_zone_id are set).
+# TLS — self-signed origin certificate (created when Cloudflare is enabled).
 #
-# Cloudflare terminates public TLS at the edge. The GCP load balancer needs its
-# own certificate for the Cloudflare → origin leg (Full-strict SSL mode).
-# A Cloudflare Origin CA cert is trusted by Cloudflare and never expires for
-# up to 15 years, so it is the correct credential here.
+# Cloudflare terminates public TLS at the edge using its own auto-managed cert.
+# The GCP load balancer needs a certificate only for the Cloudflare → origin
+# leg. A self-signed cert is sufficient here because:
+#   - Cloudflare "Full" SSL mode encrypts the origin connection without
+#     requiring a public-CA-issued cert (Full strict requires a recognised CA).
+#   - Only Cloudflare edge IPs can reach this load balancer (Cloud Armor rules
+#     100–200 allow only Cloudflare ranges and deny everything else).
 #
-# SECURITY NOTE: the RSA private key generated by tls_private_key is stored in
-# the OpenTofu state (GCS bucket oldschoolrunescapetool-tofu-state). Ensure the
-# bucket has tight IAM controls (Storage Object Admin limited to the deploy SA
-# only). To rotate the cert/key pair, taint both tls_private_key.origin_ca and
-# cloudflare_origin_ca_certificate.ui, then re-apply.
+# SECURITY NOTE: the RSA private key is stored in the OpenTofu state file
+# (GCS bucket oldschoolrunescapetool-tofu-state). Ensure the bucket has tight
+# IAM controls (Storage Object Admin limited to the deploy service account).
+# To rotate: taint tls_private_key.origin[0] and tls_self_signed_cert.origin[0]
+# then re-apply.
 # ---------------------------------------------------------------------------
 
-resource "tls_private_key" "origin_ca" {
+# Remove the old Google-managed SSL cert from state without destroying it in
+# GCP. The cert will remain in GCP until manually deleted; it is no longer
+# attached to the HTTPS proxy after this apply.
+removed {
+  from = google_compute_managed_ssl_certificate.ui
+  lifecycle {
+    destroy = false
+  }
+}
+
+resource "tls_private_key" "origin" {
   count     = local.tls_enabled ? 1 : 0
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
-resource "tls_cert_request" "origin_ca" {
+resource "tls_self_signed_cert" "origin" {
   count           = local.tls_enabled ? 1 : 0
-  private_key_pem = tls_private_key.origin_ca[0].private_key_pem
+  private_key_pem = tls_private_key.origin[0].private_key_pem
 
   subject {
     common_name = var.domain
   }
 
-  dns_names = [var.domain, "*.${var.domain}"]
+  dns_names             = [var.domain, "*.${var.domain}"]
+  validity_period_hours = 87600 # 10 years
+  is_ca_certificate     = false
+
+  allowed_uses = ["key_encipherment", "digital_signature", "server_auth"]
 }
 
-resource "cloudflare_origin_ca_certificate" "ui" {
-  count              = local.tls_enabled ? 1 : 0
-  csr                = tls_cert_request.origin_ca[0].cert_request_pem
-  hostnames          = [var.domain, "*.${var.domain}"]
-  request_type       = "origin-rsa"
-  requested_validity = 5475 # 15 years
-}
-
-# Upload the Origin CA cert + private key to GCP so the HTTPS proxy can serve it.
+# Upload the self-signed cert + private key to GCP for the HTTPS proxy.
 resource "google_compute_ssl_certificate" "ui" {
   count        = local.tls_enabled ? 1 : 0
   name_prefix  = "osrs-ui-origin-cert-"
   project      = var.project_id
-  private_key  = tls_private_key.origin_ca[0].private_key_pem
-  certificate  = cloudflare_origin_ca_certificate.ui[0].certificate
+  private_key  = tls_private_key.origin[0].private_key_pem
+  certificate  = tls_self_signed_cert.origin[0].cert_pem
 
   lifecycle {
     create_before_destroy = true
@@ -421,23 +436,24 @@ resource "google_compute_global_forwarding_rule" "ui_http" {
 # Apex A record in Cloudflare pointing to the GCP load balancer IP.
 # proxied = true routes traffic through Cloudflare's edge (CDN + DDoS protection).
 resource "cloudflare_record" "ui_a" {
-  count   = local.tls_enabled ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  name    = "@"
-  type    = "A"
-  value   = google_compute_global_address.ui.address
-  proxied = true
-  ttl     = 1 # Must be 1 (auto) when proxied = true
+  count           = local.tls_enabled ? 1 : 0
+  zone_id         = var.cloudflare_zone_id
+  name            = "@"
+  type            = "A"
+  content         = google_compute_global_address.ui.address
+  proxied         = true
+  ttl             = 1 # Must be 1 (auto) when proxied = true
+  allow_overwrite = true
 }
 
-# Enforce Full (strict) SSL so Cloudflare validates the Origin CA cert, always
+# Encrypt origin traffic (Full SSL — accepts self-signed origin cert), always
 # redirect HTTP → HTTPS, and require TLS 1.2+ across the zone.
 resource "cloudflare_zone_settings_override" "ui" {
   count   = local.tls_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
 
   settings {
-    ssl              = "strict"
+    ssl              = "full"
     always_use_https = "on"
     min_tls_version  = "1.2"
   }
