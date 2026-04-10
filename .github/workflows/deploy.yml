@@ -68,3 +68,5 @@ jobs:
 
       - name: OpenTofu Apply
         run: tofu apply -auto-approve tfplan
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
