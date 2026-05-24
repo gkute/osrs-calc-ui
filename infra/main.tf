@@ -518,7 +518,7 @@ resource "cloudflare_ruleset" "cache_api_images" {
   rules {
     ref         = "cache_api_images"
     description = "Cache icon data URIs at the edge for 1 year"
-    expression  = "(http.request.uri.path matches \"^/api/images/\")"
+    expression  = "(starts_with(http.request.uri.path, \"/api/images/\"))"
     action      = "set_cache_settings"
     enabled     = true
 
