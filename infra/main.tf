@@ -503,3 +503,35 @@ resource "cloudflare_zone_settings_override" "ui" {
     min_tls_version  = "1.2"
   }
 }
+
+# Cache /api/images/* responses at Cloudflare's edge.
+# First-time users trigger one API request per icon; without edge caching every
+# burst of icon requests hits the BFF → Cloud Run origin and can trigger 429s.
+# override_origin forces a 1-year edge TTL regardless of what the API returns.
+resource "cloudflare_ruleset" "cache_api_images" {
+  count   = local.cloudflare_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "Cache API image responses"
+  kind    = "zone"
+  phase   = "http_request_cache_settings"
+
+  rules {
+    ref         = "cache_api_images"
+    description = "Cache icon data URIs at the edge for 1 year"
+    expression  = "(http.request.uri.path matches \"^/api/images/\")"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      edge_ttl {
+        mode    = "override_origin"
+        default = 31536000
+      }
+
+      browser_ttl {
+        mode    = "override_origin"
+        default = 31536000
+      }
+    }
+  }
+}
