@@ -80,9 +80,19 @@ Infrastructure is managed with OpenTofu (open-source Terraform). CI/CD runs via 
 
 ## Git Workflow
 
+Before making any changes, always start from a fresh branch off latest main:
+
+```bash
+git checkout main
+git pull
+git fetch --prune
+git checkout -b feature/your-feature-name
+```
+
 - Work on feature branches (`feature/my-fix`), then open a PR to `main`
 - Never push directly to `main` or merge PRs — the repo owner handles review and merge
 - Conventional commit prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
+- To clean up stale local branches after remote branches are deleted: `git fetch --prune` removes stale remote-tracking refs; then `git branch -d <branch>` to delete the local copy
 
 ## Code Style
 
