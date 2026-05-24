@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { IconCacheService } from './icon-cache.service';
@@ -19,6 +19,39 @@ export class ImageService {
     );
     await this.iconCache.set(key, result.dataUri);
     return result.dataUri;
+  }
+
+  async getItemImagesBatch(itemIds: number[]): Promise<Map<number, string>> {
+    const result = new Map<number, string>();
+    if (itemIds.length === 0) return result;
+
+    const checks = await Promise.all(
+      itemIds.map(async id => ({ id, cached: await this.iconCache.get(`item:${id}`) }))
+    );
+
+    for (const { id, cached } of checks) {
+      if (cached) result.set(id, cached);
+    }
+
+    const uncached = checks.filter(c => !c.cached).map(c => c.id);
+    if (uncached.length === 0) return result;
+
+    const params = new HttpParams().set('ids', uncached.join(','));
+    const response = await firstValueFrom(
+      this.http.get<Record<string, string | null>>(`${this.base}/images/items/batch`, { params })
+    );
+
+    await Promise.all(
+      Object.entries(response).map(async ([idStr, dataUri]) => {
+        const id = parseInt(idStr, 10);
+        if (dataUri) {
+          await this.iconCache.set(`item:${id}`, dataUri);
+          result.set(id, dataUri);
+        }
+      })
+    );
+
+    return result;
   }
 
   async getSkillIcon(skillName: string): Promise<string> {

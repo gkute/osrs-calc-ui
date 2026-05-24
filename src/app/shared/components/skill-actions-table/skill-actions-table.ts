@@ -252,16 +252,17 @@ export class SkillActionsTable implements OnChanges {
   }
 
   private loadImages(actions: SkillAction[]): void {
-    const ids = this.collectItemIds(actions);
-    for (const id of ids) {
-      if (!this.itemImages().has(id)) {
-        this.imageService.getItemImage(id).then((dataUri) => {
-          const updated = new Map(this.itemImages());
-          updated.set(id, dataUri);
-          this.itemImages.set(updated);
-        }).catch(() => {});
+    const ids = this.collectItemIds(actions).filter(id => !this.itemImages().has(id));
+    if (ids.length === 0) return;
+    this.imageService.getItemImagesBatch(ids).then(imageMap => {
+      if (imageMap.size > 0) {
+        this.itemImages.update(current => {
+          const updated = new Map(current);
+          for (const [id, uri] of imageMap) updated.set(id, uri);
+          return updated;
+        });
       }
-    }
+    }).catch(() => {});
   }
 
   private collectItemIds(actions: SkillAction[]): number[] {
