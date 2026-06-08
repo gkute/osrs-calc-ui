@@ -380,16 +380,40 @@ resource "google_dns_record_set" "ui_a" {
 # Cloudflare DNS + zone settings (created only when cloudflare_zone_id is set)
 # ---------------------------------------------------------------------------
 
-# Apex CNAME in Cloudflare pointing to the Cloud Run domain mapping target.
-# proxied = true routes traffic through Cloudflare's edge (CDN + DDoS protection).
-# Cloud Run domain mapping resolves osrscalctool.com via ghs.googlehosted.com
-# and provisions a valid public cert, so Cloudflare can use Full (Strict) SSL.
+# Cloud Run domain mapping IPs — static Google anycast addresses returned by
+# `gcloud run domain-mappings describe`. Apex domains require A/AAAA records;
+# a CNAME is not valid at the zone apex in standard DNS.
+# NOTE: cert provisioning requires proxy=false (grey cloud) so Google's ACME
+# challenge can reach the origin. Re-enable proxied=true after first provision.
+locals {
+  cf_domain_mapping_ipv4 = local.cloudflare_enabled ? toset([
+    "216.239.32.21", "216.239.34.21", "216.239.36.21", "216.239.38.21",
+  ]) : toset([])
+  cf_domain_mapping_ipv6 = local.cloudflare_enabled ? toset([
+    "2001:4860:4802:32::15", "2001:4860:4802:34::15",
+    "2001:4860:4802:36::15", "2001:4860:4802:38::15",
+  ]) : toset([])
+}
+
 resource "cloudflare_record" "ui_a" {
-  count           = local.cloudflare_enabled ? 1 : 0
+  for_each        = local.cf_domain_mapping_ipv4
   zone_id         = var.cloudflare_zone_id
   name            = "@"
-  type            = "CNAME"
-  content         = "ghs.googlehosted.com"
+  type            = "A"
+  content         = each.value
+  proxied         = true
+  ttl             = 1 # Must be 1 (auto) when proxied = true
+  allow_overwrite = true
+
+  depends_on = [google_cloud_run_domain_mapping.ui]
+}
+
+resource "cloudflare_record" "ui_aaaa" {
+  for_each        = local.cf_domain_mapping_ipv6
+  zone_id         = var.cloudflare_zone_id
+  name            = "@"
+  type            = "AAAA"
+  content         = each.value
   proxied         = true
   ttl             = 1 # Must be 1 (auto) when proxied = true
   allow_overwrite = true
