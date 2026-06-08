@@ -437,20 +437,47 @@ resource "cloudflare_zone_settings_override" "ui" {
 }
 
 # Cache /api/images/* responses at Cloudflare's edge.
-# First-time users trigger one API request per icon; without edge caching every
-# burst of icon requests hits the BFF → Cloud Run origin and can trigger 429s.
-# override_origin forces a 1-year edge TTL regardless of what the API returns.
+# Cloudflare can only have one ruleset per cache phase, so both the API image
+# rule and the static asset rule live here.
 resource "cloudflare_ruleset" "cache_api_images" {
   count   = local.cloudflare_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "Cache API image responses"
+  name    = "Cache rules"
   kind    = "zone"
   phase   = "http_request_cache_settings"
 
+  # API icon responses — data URIs returned by /api/images/*.
+  # First-time users trigger one request per icon; edge caching prevents that
+  # burst from hitting Cloud Run on every new edge node.
   rules {
     ref         = "cache_api_images"
     description = "Cache icon data URIs at the edge for 1 year"
     expression  = "(starts_with(http.request.uri.path, \"/api/images/\"))"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      edge_ttl {
+        mode    = "override_origin"
+        default = 31536000
+      }
+
+      browser_ttl {
+        mode    = "override_origin"
+        default = 31536000
+      }
+    }
+  }
+
+  # Angular static assets — JS/CSS/font/image files with content-hashed
+  # filenames. Safe for a 1-year TTL because Angular's build appends a hash
+  # to every filename (e.g. main.4f3a2b1c.js); a new deploy changes the hash
+  # so Cloudflare has no cache entry for the new filename.
+  # index.html is intentionally excluded — it has no hash and must stay fresh.
+  rules {
+    ref         = "cache_static_assets"
+    description = "Cache hashed Angular static assets for 1 year"
+    expression  = "http.request.uri.path matches \"\\.(js|css|woff2?|ttf|eot|ico|svg|png|jpg|jpeg|gif|webp)(\\?.*)?$\""
     action      = "set_cache_settings"
     enabled     = true
 
