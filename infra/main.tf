@@ -477,7 +477,7 @@ resource "cloudflare_ruleset" "cache_api_images" {
   rules {
     ref         = "cache_static_assets"
     description = "Cache hashed Angular static assets for 1 year"
-    expression  = "http.request.uri.path matches \"\\.(js|css|woff2?|ttf|eot|ico|svg|png|jpg|jpeg|gif|webp)(\\?.*)?$\""
+    expression  = "(ends_with(http.request.uri.path, \".js\") or ends_with(http.request.uri.path, \".css\") or ends_with(http.request.uri.path, \".woff2\") or ends_with(http.request.uri.path, \".woff\") or ends_with(http.request.uri.path, \".ttf\") or ends_with(http.request.uri.path, \".ico\") or ends_with(http.request.uri.path, \".svg\") or ends_with(http.request.uri.path, \".png\") or ends_with(http.request.uri.path, \".jpg\") or ends_with(http.request.uri.path, \".jpeg\") or ends_with(http.request.uri.path, \".webp\"))"
     action      = "set_cache_settings"
     enabled     = true
 
