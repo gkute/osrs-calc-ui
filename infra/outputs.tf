@@ -25,7 +25,7 @@ output "dns_mode" {
 
 output "cloudflare_record" {
   description = "Cloudflare DNS A record hostname (null when Cloudflare is not enabled)"
-  value       = local.cloudflare_enabled ? cloudflare_record.ui_a[0].hostname : null
+  value       = local.cloudflare_enabled ? one(values(cloudflare_record.ui_a)).hostname : null
 }
 
 output "gcp_dns_nameservers" {
