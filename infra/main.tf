@@ -19,41 +19,6 @@ locals {
   # (osrs-api-PROJECT_NUMBER.REGION.run.app) is the stable v2 URL and is what
   # Cloud Run IAM treats as the canonical audience for OIDC token verification.
   api_url = "https://osrs-api-${data.google_project.project.number}.${var.region}.run.app"
-
-  # ---------------------------------------------------------------------------
-  # Cloudflare edge IP ranges (https://www.cloudflare.com/ips/)
-  # Split into batches of ≤10 because Cloud Armor SRC_IPS_V1 rules accept at
-  # most 10 ranges each. Cloud Armor's CEL expression limit (5 sub-expressions)
-  # makes the single-CEL approach unworkable with all 22 Cloudflare ranges.
-  # ---------------------------------------------------------------------------
-  cf_ips_batch1 = [
-    "173.245.48.0/20",
-    "103.21.244.0/22",
-    "103.22.200.0/22",
-    "103.31.4.0/22",
-    "141.101.64.0/18",
-    "108.162.192.0/18",
-    "190.93.240.0/20",
-    "188.114.96.0/20",
-    "197.234.240.0/22",
-    "198.41.128.0/17",
-  ]
-  cf_ips_batch2 = [
-    "162.158.0.0/15",
-    "104.16.0.0/13",
-    "104.24.0.0/14",
-    "172.64.0.0/13",
-    "131.0.72.0/22",
-    "2400:cb00::/32",
-    "2606:4700::/32",
-    "2803:f800::/32",
-    "2405:b500::/32",
-    "2405:8100::/32",
-  ]
-  cf_ips_batch3 = [
-    "2a06:98c0::/29",
-    "2c0f:f248::/32",
-  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -103,9 +68,14 @@ resource "google_cloud_run_v2_service" "ui" {
   location = var.region
   project  = var.project_id
 
-  # Block direct *.run.app access — all traffic must enter through the load
-  # balancer so Cloud Armor is always in the path.
-  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  # Ingress gating depends on which origin-lock mechanism is active:
+  #   cloudflare_enabled → INGRESS_TRAFFIC_ALL: Cloudflare reaches Cloud Run
+  #     directly via the custom domain mapping. The OpenResty BFF rejects any
+  #     request missing the X-Origin-Auth shared secret injected by the
+  #     Cloudflare Transform Rule, so direct *.run.app hits get 403.
+  #   else → INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER: only the GCP LB can reach
+  #     the service; Cloud Armor on the LB enforces WAF/rate-limit rules.
+  ingress = local.cloudflare_enabled ? "INGRESS_TRAFFIC_ALL" : "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   template {
     service_account = google_service_account.ui.email
@@ -131,6 +101,18 @@ resource "google_cloud_run_v2_service" "ui" {
         value = local.api_url
       }
 
+      # ORIGIN_AUTH_SECRET — only injected when Cloudflare is in front.
+      # OpenResty checks the X-Origin-Auth header against this value and
+      # returns 403 if it doesn't match. The header is set by a Cloudflare
+      # Transform Rule (see cloudflare_ruleset.origin_auth_header).
+      dynamic "env" {
+        for_each = local.cloudflare_enabled ? [1] : []
+        content {
+          name  = "ORIGIN_AUTH_SECRET"
+          value = random_password.origin_auth[0].result
+        }
+      }
+
       resources {
         limits = {
           cpu    = "1"
@@ -145,8 +127,39 @@ resource "google_cloud_run_v2_service" "ui" {
   depends_on = [google_cloud_run_v2_service_iam_member.ui_invokes_api]
 }
 
-# Public access — authentication is handled by Cloud Armor at the LB layer,
-# not by Cloud Run IAM.
+# Shared secret injected by Cloudflare on every request (via Transform Rule)
+# and verified by the OpenResty BFF. Replaces Cloud Armor's Cloudflare-IP
+# whitelist as the origin-lock mechanism, saving ~$27/month in LB + Armor
+# baseline charges. To rotate: tofu taint random_password.origin_auth[0]
+# then re-apply; the Cloudflare rule and Cloud Run env var update atomically.
+resource "random_password" "origin_auth" {
+  count   = local.cloudflare_enabled ? 1 : 0
+  length  = 48
+  special = false
+}
+
+# Cloud Run domain mapping — gives osrscalctool.com a valid Google-issued
+# origin cert and resolves via ghs.googlehosted.com. Replaces the GCP global
+# HTTPS LB on the Cloudflare path. Requires the domain to be verified in
+# Google Search Console under the project owner's account before first apply.
+resource "google_cloud_run_domain_mapping" "ui" {
+  count    = local.cloudflare_enabled ? 1 : 0
+  name     = var.domain
+  location = var.region
+  project  = var.project_id
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = google_cloud_run_v2_service.ui.name
+  }
+}
+
+# Public access — origin lock is enforced upstream of Cloud Run IAM:
+# Cloudflare path: X-Origin-Auth header check in the OpenResty BFF (nginx.conf)
+# Non-Cloudflare path: Cloud Armor + INTERNAL_LOAD_BALANCER ingress on the LB.
 resource "google_cloud_run_v2_service_iam_member" "ui_public" {
   project  = var.project_id
   location = var.region
@@ -156,124 +169,54 @@ resource "google_cloud_run_v2_service_iam_member" "ui_public" {
 }
 
 # ---------------------------------------------------------------------------
-# Cloud Armor security policy
+# Cloud Armor security policy — only provisioned on the non-Cloudflare path.
+# When Cloudflare is in front, Cloudflare's edge handles WAF and rate-limiting
+# and the origin lock is enforced via a shared-secret header check in the
+# OpenResty BFF, eliminating the need for Cloud Armor (~$8.50/month).
 # NOTE: preconfigured WAF rules and rate-limiting require Cloud Armor Standard
-# (~$5/month + per-request fees). Remove the throttle and preconfigured rules
-# to stay on the free tier.
+# (~$5/month + per-request fees).
 # ---------------------------------------------------------------------------
 
 resource "google_compute_security_policy" "ui" {
+  count   = local.cloudflare_enabled ? 0 : 1
   name    = "osrs-ui-armor"
   project = var.project_id
 
-  # ---------------------------------------------------------------------------
-  # Cloudflare-enabled mode: allow only Cloudflare edge IPs, deny everything
-  # else. Cloud Armor SRC_IPS_V1 rules accept ≤10 CIDR ranges each, so the
-  # 22 Cloudflare ranges are spread across three allow rules (100–102). A
-  # catch-all deny at priority 200 blocks any non-Cloudflare source.
-  # Rate-limiting and WAF are omitted here — Cloudflare handles both at the
-  # edge before traffic even reaches GCP.
-  # ---------------------------------------------------------------------------
-
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [1] : []
-    content {
-      priority    = 100
-      action      = "allow"
-      description = "Allow Cloudflare edge IPs batch 1/3"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config { src_ip_ranges = local.cf_ips_batch1 }
-      }
-    }
-  }
-
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [1] : []
-    content {
-      priority    = 101
-      action      = "allow"
-      description = "Allow Cloudflare edge IPs batch 2/3"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config { src_ip_ranges = local.cf_ips_batch2 }
-      }
-    }
-  }
-
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [1] : []
-    content {
-      priority    = 102
-      action      = "allow"
-      description = "Allow Cloudflare edge IPs batch 3/3"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config { src_ip_ranges = local.cf_ips_batch3 }
-      }
-    }
-  }
-
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [1] : []
-    content {
-      priority    = 200
-      action      = "deny(403)"
-      description = "Block all traffic not originating from Cloudflare"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config { src_ip_ranges = ["*"] }
-      }
-    }
-  }
-
-  # ---------------------------------------------------------------------------
-  # Direct (non-Cloudflare) mode: rate-limit and WAF rules apply when Cloudflare
-  # is not in front. These are skipped when Cloudflare is enabled because
-  # Cloudflare's edge handles rate-limiting and WAF before traffic reaches GCP.
-  # ---------------------------------------------------------------------------
-
   # Rate limiting — ban IPs that exceed 500 requests/minute for 60 seconds
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [] : [1]
-    content {
-      priority    = 1000
-      action      = "rate_based_ban"
-      description = "Ban IPs exceeding 500 req/min for 60 s"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config { src_ip_ranges = ["*"] }
+  rule {
+    priority    = 1000
+    action      = "rate_based_ban"
+    description = "Ban IPs exceeding 500 req/min for 60 s"
+    match {
+      versioned_expr = "SRC_IPS_V1"
+      config { src_ip_ranges = ["*"] }
+    }
+    rate_limit_options {
+      rate_limit_threshold {
+        count        = 500
+        interval_sec = 60
       }
-      rate_limit_options {
-        rate_limit_threshold {
-          count        = 500
-          interval_sec = 60
-        }
-        ban_duration_sec = 60
-        conform_action   = "allow"
-        exceed_action    = "deny(429)"
-        enforce_on_key   = "IP"
-      }
+      ban_duration_sec = 60
+      conform_action   = "allow"
+      exceed_action    = "deny(429)"
+      enforce_on_key   = "IP"
     }
   }
 
   # OWASP core WAF rules — blocks XSS, SQLi, LFI, RFI, scanner probes
-  dynamic "rule" {
-    for_each = local.cloudflare_enabled ? [] : [1]
-    content {
-      priority    = 2000
-      action      = "deny(403)"
-      description = "OWASP core WAF rules"
-      match {
-        expr {
-          expression = join(" || ", [
-            "evaluatePreconfiguredExpr('xss-v33-stable')",
-            "evaluatePreconfiguredExpr('sqli-v33-stable')",
-            "evaluatePreconfiguredExpr('lfi-v33-stable')",
-            "evaluatePreconfiguredExpr('rfi-v33-stable')",
-            "evaluatePreconfiguredExpr('scannerdetection-v33-stable')",
-          ])
-        }
+  rule {
+    priority    = 2000
+    action      = "deny(403)"
+    description = "OWASP core WAF rules"
+    match {
+      expr {
+        expression = join(" || ", [
+          "evaluatePreconfiguredExpr('xss-v33-stable')",
+          "evaluatePreconfiguredExpr('sqli-v33-stable')",
+          "evaluatePreconfiguredExpr('lfi-v33-stable')",
+          "evaluatePreconfiguredExpr('rfi-v33-stable')",
+          "evaluatePreconfiguredExpr('scannerdetection-v33-stable')",
+        ])
       }
     }
   }
@@ -291,17 +234,21 @@ resource "google_compute_security_policy" "ui" {
 }
 
 # ---------------------------------------------------------------------------
-# Global external HTTPS load balancer with Cloud Armor
+# Global external HTTPS load balancer with Cloud Armor — non-Cloudflare path
+# only. When Cloudflare is enabled, traffic flows directly to Cloud Run via
+# the domain mapping above, avoiding ~$18.60/month in LB baseline charges.
 # ---------------------------------------------------------------------------
 
 # Static external IP — point your DNS A record here after the first apply.
 resource "google_compute_global_address" "ui" {
+  count   = local.cloudflare_enabled ? 0 : 1
   name    = "osrs-ui-ip"
   project = var.project_id
 }
 
 # Serverless NEG — maps the global LB backend to the regional Cloud Run service
 resource "google_compute_region_network_endpoint_group" "ui" {
+  count                 = local.cloudflare_enabled ? 0 : 1
   name                  = "osrs-ui-neg"
   network_endpoint_type = "SERVERLESS"
   region                = var.region
@@ -314,74 +261,30 @@ resource "google_compute_region_network_endpoint_group" "ui" {
 
 # Backend service — attaches Cloud Armor and references the serverless NEG
 resource "google_compute_backend_service" "ui" {
+  count                 = local.cloudflare_enabled ? 0 : 1
   name                  = "osrs-ui-backend"
   project               = var.project_id
   protocol              = "HTTPS"
   load_balancing_scheme = "EXTERNAL_MANAGED"
-  security_policy       = google_compute_security_policy.ui.id
+  security_policy       = google_compute_security_policy.ui[0].id
 
   backend {
-    group = google_compute_region_network_endpoint_group.ui.id
+    group = google_compute_region_network_endpoint_group.ui[0].id
   }
 }
 
 resource "google_compute_url_map" "ui" {
+  count           = local.cloudflare_enabled ? 0 : 1
   name            = "osrs-ui-url-map"
   project         = var.project_id
-  default_service = google_compute_backend_service.ui.id
+  default_service = google_compute_backend_service.ui[0].id
 }
 
 # ---------------------------------------------------------------------------
-# TLS certificates — two paths, controlled by cloudflare_zone_id:
-#
-#   cloudflare_zone_id set   → self-signed cert (Cloudflare Full SSL; only
-#                              Cloudflare edge IPs reach the LB via Cloud Armor)
-#   cloudflare_zone_id empty → Google-managed SSL cert (auto-provisioned and
-#                              renewed by GCP; requires Cloud DNS A record)
-#
-# SECURITY NOTE (self-signed path): the RSA private key is stored in the
-# OpenTofu state file (GCS bucket oldschoolrunescapetool-tofu-state). Ensure
-# the bucket is tightly IAM-restricted (Storage Object Admin limited to the
-# deploy service account). To rotate: taint tls_private_key.origin[0] and
-# tls_self_signed_cert.origin[0] then re-apply.
+# TLS — Google-managed SSL cert on the non-Cloudflare LB path. The Cloudflare
+# path uses the Cloud Run domain mapping's auto-provisioned cert instead, so
+# no GCP cert resources are needed there.
 # ---------------------------------------------------------------------------
-
-# --- Cloudflare path: self-signed origin cert ---
-
-resource "tls_private_key" "origin" {
-  count     = local.cloudflare_enabled ? 1 : 0
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "tls_self_signed_cert" "origin" {
-  count           = local.cloudflare_enabled ? 1 : 0
-  private_key_pem = tls_private_key.origin[0].private_key_pem
-
-  subject {
-    common_name = var.domain
-  }
-
-  dns_names             = [var.domain, "*.${var.domain}"]
-  validity_period_hours = 87600 # 10 years
-  is_ca_certificate     = false
-
-  allowed_uses = ["key_encipherment", "digital_signature", "server_auth"]
-}
-
-resource "google_compute_ssl_certificate" "ui" {
-  count        = local.cloudflare_enabled ? 1 : 0
-  name_prefix  = "osrs-ui-origin-cert-"
-  project      = var.project_id
-  private_key  = tls_private_key.origin[0].private_key_pem
-  certificate  = tls_self_signed_cert.origin[0].cert_pem
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# --- GCP DNS path: Google-managed SSL cert (auto-renewed by GCP) ---
 
 resource "google_compute_managed_ssl_certificate" "ui" {
   count   = local.gcp_dns_enabled ? 1 : 0
@@ -398,19 +301,18 @@ resource "google_compute_managed_ssl_certificate" "ui" {
 }
 
 resource "google_compute_target_https_proxy" "ui" {
-  count   = local.tls_enabled ? 1 : 0
-  name    = "osrs-ui-https-proxy"
-  project = var.project_id
-  url_map = google_compute_url_map.ui.id
-
-  ssl_certificates = local.cloudflare_enabled ? [google_compute_ssl_certificate.ui[0].id] : [google_compute_managed_ssl_certificate.ui[0].id]
+  count            = local.gcp_dns_enabled ? 1 : 0
+  name             = "osrs-ui-https-proxy"
+  project          = var.project_id
+  url_map          = google_compute_url_map.ui[0].id
+  ssl_certificates = [google_compute_managed_ssl_certificate.ui[0].id]
 }
 
 resource "google_compute_global_forwarding_rule" "ui_https" {
-  count                 = local.tls_enabled ? 1 : 0
+  count                 = local.gcp_dns_enabled ? 1 : 0
   name                  = "osrs-ui-https"
   project               = var.project_id
-  ip_address            = google_compute_global_address.ui.address
+  ip_address            = google_compute_global_address.ui[0].address
   port_range            = "443"
   target                = google_compute_target_https_proxy.ui[0].id
   load_balancing_scheme = "EXTERNAL_MANAGED"
@@ -441,14 +343,14 @@ resource "google_compute_target_http_proxy" "ui" {
   count   = local.cloudflare_enabled ? 0 : 1
   name    = "osrs-ui-http-proxy"
   project = var.project_id
-  url_map = local.tls_enabled ? google_compute_url_map.ui_http_redirect[0].id : google_compute_url_map.ui.id
+  url_map = local.tls_enabled ? google_compute_url_map.ui_http_redirect[0].id : google_compute_url_map.ui[0].id
 }
 
 resource "google_compute_global_forwarding_rule" "ui_http" {
   count                 = local.cloudflare_enabled ? 0 : 1
   name                  = "osrs-ui-http"
   project               = var.project_id
-  ip_address            = google_compute_global_address.ui.address
+  ip_address            = google_compute_global_address.ui[0].address
   port_range            = "80"
   target                = google_compute_target_http_proxy.ui[0].id
   load_balancing_scheme = "EXTERNAL_MANAGED"
@@ -471,34 +373,40 @@ resource "google_dns_record_set" "ui_a" {
   ttl          = 300
   managed_zone = data.google_dns_managed_zone.ui[0].name
   project      = var.project_id
-  rrdatas      = [google_compute_global_address.ui.address]
+  rrdatas      = [google_compute_global_address.ui[0].address]
 }
 
 # ---------------------------------------------------------------------------
 # Cloudflare DNS + zone settings (created only when cloudflare_zone_id is set)
 # ---------------------------------------------------------------------------
 
-# Apex A record in Cloudflare pointing to the GCP load balancer IP.
+# Apex CNAME in Cloudflare pointing to the Cloud Run domain mapping target.
 # proxied = true routes traffic through Cloudflare's edge (CDN + DDoS protection).
+# Cloud Run domain mapping resolves osrscalctool.com via ghs.googlehosted.com
+# and provisions a valid public cert, so Cloudflare can use Full (Strict) SSL.
 resource "cloudflare_record" "ui_a" {
   count           = local.cloudflare_enabled ? 1 : 0
   zone_id         = var.cloudflare_zone_id
   name            = "@"
-  type            = "A"
-  content         = google_compute_global_address.ui.address
+  type            = "CNAME"
+  content         = "ghs.googlehosted.com"
   proxied         = true
   ttl             = 1 # Must be 1 (auto) when proxied = true
   allow_overwrite = true
+
+  depends_on = [google_cloud_run_domain_mapping.ui]
 }
 
-# Encrypt origin traffic (Full SSL — accepts self-signed origin cert), always
-# redirect HTTP → HTTPS, and require TLS 1.2+ across the zone.
+# Encrypt origin traffic with Full (Strict) — Cloud Run presents a valid
+# public cert for the custom domain via its domain mapping, so strict mode
+# is appropriate and rejects any cert mismatch. always_use_https redirects
+# HTTP → HTTPS at the edge.
 resource "cloudflare_zone_settings_override" "ui" {
   count   = local.cloudflare_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
 
   settings {
-    ssl              = "full"
+    ssl              = "strict"
     always_use_https = "on"
     min_tls_version  = "1.2"
   }
@@ -531,6 +439,34 @@ resource "cloudflare_ruleset" "cache_api_images" {
       browser_ttl {
         mode    = "override_origin"
         default = 31536000
+      }
+    }
+  }
+}
+
+# Inject a shared-secret header on every request reaching the origin so the
+# OpenResty BFF can verify the request came via Cloudflare. Replaces the
+# Cloud Armor Cloudflare-IP whitelist that previously enforced origin lock.
+# The matching check lives in osrs-calc-ui/nginx.conf (access_by_lua_block).
+resource "cloudflare_ruleset" "origin_auth_header" {
+  count   = local.cloudflare_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "Inject origin auth header"
+  kind    = "zone"
+  phase   = "http_request_late_transform"
+
+  rules {
+    ref         = "origin_auth_header"
+    description = "Add shared secret so origin can verify request came via Cloudflare"
+    expression  = "true"
+    action      = "rewrite"
+    enabled     = true
+
+    action_parameters {
+      headers {
+        name      = "X-Origin-Auth"
+        operation = "set"
+        value     = random_password.origin_auth[0].result
       }
     }
   }

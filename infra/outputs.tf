@@ -1,11 +1,11 @@
 output "load_balancer_ip" {
-  description = "Static external IP of the load balancer — set as the DNS A record (managed by Terraform in either Cloudflare or Cloud DNS mode)"
-  value       = google_compute_global_address.ui.address
+  description = "Static external IP of the GCP load balancer (null on the Cloudflare path, which bypasses the LB and routes via Cloud Run domain mapping)"
+  value       = local.cloudflare_enabled ? null : google_compute_global_address.ui[0].address
 }
 
 output "ui_url" {
   description = "Public URL of the UI"
-  value       = local.tls_enabled ? "https://${var.domain}" : "http://${google_compute_global_address.ui.address}"
+  value       = local.tls_enabled ? "https://${var.domain}" : "http://${google_compute_global_address.ui[0].address}"
 }
 
 output "service_account_email" {
